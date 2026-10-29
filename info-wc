@@ -1,0 +1,535 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION=1.0
+CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/info-wc
+CACHE_FILE=$CACHE_DIR/public-ip
+TTL=900
+BAR_W=16
+
+refresh=0
+net=1
+
+usage() {
+  cat <<'EOF'
+info-wc - resumen del sistema estilo neofetch, simple y ligero
+
+uso: info-wc [opciones]
+
+  -r, --refresh   ignora la caché y vuelve a consultar la IP pública
+  -n, --no-net    no consulta la IP pública
+  -V, --version   muestra la versión
+  -h, --help      muestra esta ayuda
+EOF
+}
+
+while (( $# )); do
+  case $1 in
+    -r|--refresh) refresh=1; shift ;;
+    -n|--no-net)  net=0; shift ;;
+    -V|--version) printf 'info-wc %s\n' "$VERSION"; exit 0 ;;
+    -h|--help)    usage; exit 0 ;;
+    *) printf 'info-wc: opción desconocida: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+
+use_color=0
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+  use_color=1
+fi
+
+if (( use_color )); then
+  C1=$'\033[38;5;51m'
+  C2=$'\033[38;5;171m'
+  DIM=$'\033[38;5;244m'
+  BLD=$'\033[1m'
+  GRN=$'\033[38;5;114m'
+  YEL=$'\033[38;5;221m'
+  ORG=$'\033[38;5;214m'
+  BAR_CPU=$'\033[38;5;45m'
+  BAR_RAM=$'\033[38;5;75m'
+  BAR_SWAP=$'\033[38;5;141m'
+  BAR_DISK=$'\033[38;5;79m'
+  BAR_GPU=$'\033[38;5;213m'
+  BAR_BAT=$'\033[38;5;114m'
+  RST=$'\033[0m'
+else
+  C1='' C2='' DIM='' BLD='' GRN='' YEL='' ORG='' RST=''
+  BAR_CPU='' BAR_RAM='' BAR_SWAP='' BAR_DISK='' BAR_GPU='' BAR_BAT=''
+fi
+
+tmp_cache=''
+cleanup() {
+  [[ -n $tmp_cache ]] && rm -f -- "$tmp_cache"
+  return 0
+}
+trap cleanup EXIT
+
+human() {
+  local b=${1:-0} i=0 div=1 whole frac
+  local units=(B K M G T)
+  while (( b / div >= 1024 && i < 4 )); do
+    div=$(( div * 1024 ))
+    i=$(( i + 1 ))
+  done
+  whole=$(( b / div ))
+  frac=$(( (b % div) * 10 / div ))
+  printf '%d.%d%s' "$whole" "$frac" "${units[i]}"
+}
+
+bar() {
+  local pct=${1:-0} w=${2:-$BAR_W} color=${3:-} filled pad
+  if (( pct < 0 )); then pct=0; fi
+  if (( pct > 100 )); then pct=100; fi
+  filled=$(( pct * w / 100 ))
+  printf -v pad '%*s' "$filled" ''
+  pad=${pad// /█}
+  printf '%s%s' "$color" "$pad"
+  printf -v pad '%*s' "$(( w - filled ))" ''
+  pad=${pad// /░}
+  printf '%s%s%s' "$DIM" "$pad" "$RST"
+}
+
+line() {
+  printf '  %s%-9s%s %s\n' "$C1" "$1" "$RST" "$2"
+}
+
+sep() {
+  printf '  %s%s%s\n' "$DIM" "$(printf '─%.0s' {1..46})" "$RST"
+}
+
+meminfo() {
+  awk -v k="$1" '$1 == k":" { print $2; exit }' /proc/meminfo 2>/dev/null || true
+}
+
+shorten() {
+  local s=$1 max=${2:-48}
+  if (( ${#s} > max )); then
+    s=${s:0:max-1}…
+  fi
+  printf '%s' "$s"
+}
+
+cpu_short() {
+  local s=$1
+  s=${s//(R)/}
+  s=${s//(TM)/}
+  s=${s//(r)/}
+  s=${s//(tm)/}
+  s=$(printf '%s' "$s" | sed -E \
+    -e 's/[[:space:]]+@[[:space:]]*[0-9.]+[[:space:]]*GHz//Ig' \
+    -e 's/[[:space:]]+(with|w\/)[[:space:]]+Radeon.*$//Ig' \
+    -e 's/[[:space:]]+Radeon.*$//Ig' \
+    -e 's/[[:space:]]+[A-Za-z0-9]+-Core.*$//Ig' \
+    -e 's/[[:space:]]+[0-9]+[[:space:]]+Compute Cores.*$//Ig' \
+    -e 's/[[:space:]]+[0-9]+C\+[0-9]+G.*$//Ig' \
+    -e 's/[[:space:]]+(CPU|Processor)[[:space:]]*$//Ig' \
+    -e 's/^[0-9]+(st|nd|rd|th)[[:space:]]+Gen[[:space:]]+//Ig' \
+    -e 's/[[:space:]]+/ /g' \
+    -e 's/^[[:space:]]+//' \
+    -e 's/[[:space:]]+$//')
+  shorten "$s" 44
+}
+
+gpu_short() {
+  local s=$1 vendor=''
+  case $s in
+    *NVIDIA*) vendor=NVIDIA ;;
+    *AMD*|*ATI*|*Advanced\ Micro\ Devices*|*Radeon*) vendor=AMD ;;
+    *Intel*) vendor=Intel ;;
+  esac
+  s=$(printf '%s' "$s" | sed -E \
+    -e 's/Advanced Micro Devices, Inc\. \[AMD\/ATI\]/AMD/g' \
+    -e 's/\[AMD\/ATI\]//g' \
+    -e 's/NVIDIA Corporation/NVIDIA/g' \
+    -e 's/Intel Corporation/Intel/g' \
+    -e 's/\(rev [0-9a-fA-F]+\)//g' \
+    -e 's/[[:space:]]+/ /g' \
+    -e 's/^[[:space:]]+//' \
+    -e 's/[[:space:]]+$//')
+  if [[ $s == *'['*']'* ]]; then
+    s=$(printf '%s' "$s" | sed -E 's/.*\[([^]]*)\].*/\1/')
+  fi
+  s=$(printf '%s' "$s" | sed -E \
+    -e 's/[[:space:]]+Graphics[[:space:]]*$//Ig' \
+    -e 's/[[:space:]]+/ /g' \
+    -e 's/^[[:space:]]+//' \
+    -e 's/[[:space:]]+$//')
+  if [[ -n $vendor && $s != "$vendor"* ]]; then
+    s="$vendor $s"
+  fi
+  shorten "$s" 52
+}
+
+host=${HOSTNAME:-$(hostname 2>/dev/null || echo desconocido)}
+os=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null || true)
+if [[ -z $os ]]; then os=$(uname -s 2>/dev/null || echo desconocido); fi
+arch=$(uname -m 2>/dev/null || true)
+kernel=$(uname -r 2>/dev/null || echo desconocido)
+shell_v="bash ${BASH_VERSION%%(*}"
+
+read -r up _ < /proc/uptime || up=0
+up=${up%.*}
+d=$(( up / 86400 ))
+h=$(( up % 86400 / 3600 ))
+m=$(( up % 3600 / 60 ))
+uptime_str=''
+if (( d > 0 )); then uptime_str+="${d}d "; fi
+if (( d > 0 || h > 0 )); then uptime_str+="${h}h "; fi
+uptime_str+="${m}m"
+
+de=${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}
+if [[ $de == *:* ]]; then de=${de##*:}; fi
+
+cpu_model=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)
+if [[ -z $cpu_model ]]; then cpu_model=$(uname -m 2>/dev/null || echo desconocido); fi
+cpu_model=$(cpu_short "$cpu_model")
+cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo '?')
+cpu_mhz=''
+if [[ -r /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq ]]; then
+  cpu_mhz=$(awk '{printf "%.1f", $1 / 1000000}' /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null || true)
+fi
+if [[ -z $cpu_mhz ]]; then
+  cpu_mhz=$(awk -F': ' '/cpu MHz/{v=$2+0; if(v>m)m=v} END{if(m)printf "%.1f", m/1000}' /proc/cpuinfo 2>/dev/null || true)
+fi
+
+read -r l1 l2 l3 _ < /proc/loadavg || { l1=0; l2=0; l3=0; }
+
+mem_total_kb=$(meminfo MemTotal)
+mem_avail_kb=$(meminfo MemAvailable)
+if [[ -z $mem_avail_kb ]]; then mem_avail_kb=$(meminfo MemFree); fi
+mem_total_b=$(( ${mem_total_kb:-0} * 1024 ))
+mem_avail_b=$(( ${mem_avail_kb:-0} * 1024 ))
+mem_used_b=$(( mem_total_b - mem_avail_b ))
+mem_pct=0
+if (( mem_total_b > 0 )); then mem_pct=$(( mem_used_b * 100 / mem_total_b )); fi
+
+swap_total_kb=$(meminfo SwapTotal)
+swap_free_kb=$(meminfo SwapFree)
+swap_total_b=$(( ${swap_total_kb:-0} * 1024 ))
+swap_free_b=$(( ${swap_free_kb:-0} * 1024 ))
+swap_used_b=$(( swap_total_b - swap_free_b ))
+swap_pct=0
+if (( swap_total_b > 0 )); then swap_pct=$(( swap_used_b * 100 / swap_total_b )); fi
+
+disk_used=0
+disk_size=0
+disk_pct=0
+disk_mp=/
+read -r disk_used disk_size disk_pct disk_mp < <(df -P -B1 / 2>/dev/null | awk 'NR==2{print $3, $2, $5, $6}') || true
+disk_used=${disk_used:-0}
+disk_size=${disk_size:-0}
+disk_pct=${disk_pct:-0}
+disk_mp=${disk_mp:-/}
+disk_pct=${disk_pct%\%}
+disk_ok=0
+if [[ $disk_size =~ ^[0-9]+$ ]] && (( disk_size > 0 )); then
+  disk_ok=1
+fi
+
+home_mp=$(df -P -B1 "$HOME" 2>/dev/null | awk 'NR==2{print $6}' || true)
+
+lan_info() {
+  local out=''
+  if command -v ip >/dev/null 2>&1; then
+    out=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src")s=$(i+1); if($i=="dev")d=$(i+1)}} END{if(s)print d, s}' || true)
+    if [[ -z $out ]]; then
+      out=$(ip -4 -o addr show scope global 2>/dev/null | awk 'NR==1{print $2, $4}' || true)
+      out=${out%%/*}
+    fi
+  fi
+  if [[ -z $out ]]; then
+    out=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  printf '%s' "${out:-sin conexión}"
+}
+
+valid_ip() {
+  local ip=$1 n
+  local -a o
+  if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    local IFS=.
+    read -r -a o <<< "$ip"
+    for n in "${o[@]}"; do
+      (( n <= 255 )) || return 1
+    done
+    return 0
+  fi
+  if [[ $ip == *:* && $ip =~ ^[0-9a-fA-F:]+$ && $ip != *:::* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+public_ip() {
+  local ip='' ts='' cached='' now
+  if (( refresh == 0 )) && [[ -s $CACHE_FILE ]]; then
+    read -r ts cached < "$CACHE_FILE" || true
+    if [[ $ts =~ ^[0-9]+$ ]] && valid_ip "$cached"; then
+      now=$(date +%s)
+      if (( now - ts < TTL )); then
+        printf '%s' "$cached"
+        return 0
+      fi
+    fi
+  fi
+  ip=$(curl -fsS --max-time 2 https://api.ipify.org 2>/dev/null || true)
+  if [[ -z $ip ]]; then
+    ip=$(curl -fsS --max-time 2 https://ifconfig.me/ip 2>/dev/null || true)
+  fi
+  ip=${ip//[$'\r\n ']/}
+  if valid_ip "$ip"; then
+    if mkdir -p "$CACHE_DIR" 2>/dev/null; then
+      tmp_cache=$CACHE_FILE.tmp.$$
+      if printf '%s %s\n' "$(date +%s)" "$ip" > "$tmp_cache" 2>/dev/null; then
+        mv -f -- "$tmp_cache" "$CACHE_FILE" 2>/dev/null || rm -f -- "$tmp_cache"
+        tmp_cache=''
+      fi
+    fi
+    printf '%s' "$ip"
+  fi
+}
+
+usage_line() {
+  printf '  %s%-9s%s ' "$C1" "$1" "$RST"
+  bar "$2" "$BAR_W" "${3:-}"
+  printf '  %s%d%%%s' "$DIM" "$2" "$RST"
+  if [[ -n ${4:-} ]]; then
+    printf '  %s%s%s' "$DIM" "$4" "$RST"
+  fi
+  printf '\n'
+}
+
+cpu_usage() {
+  local t1 i1 t2 i2 dt di
+  read -r t1 i1 < <(awk '/^cpu /{t=0; for(n=2;n<=9&&n<=NF;n++) t+=$n; print t, $5+$6; exit}' /proc/stat)
+  sleep 0.2
+  read -r t2 i2 < <(awk '/^cpu /{t=0; for(n=2;n<=9&&n<=NF;n++) t+=$n; print t, $5+$6; exit}' /proc/stat)
+  dt=$(( t2 - t1 ))
+  di=$(( i2 - i1 ))
+  if (( dt <= 0 )); then
+    printf '0'
+    return 0
+  fi
+  printf '%d' "$(( (dt - di) * 100 / dt ))"
+}
+
+gpu_usage() {
+  local p='' f
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    p=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ' || true)
+  fi
+  if [[ ! $p =~ ^[0-9]+$ ]]; then
+    for f in /sys/class/drm/card*/device/gpu_busy_percent; do
+      [[ -r $f ]] || continue
+      p=$(cat "$f" 2>/dev/null || true)
+      [[ $p =~ ^[0-9]+$ ]] && break
+    done
+  fi
+  if [[ $p =~ ^[0-9]+$ ]]; then
+    printf '%s' "$p"
+    return 0
+  fi
+  return 1
+}
+
+cpu_temp() {
+  local h name f t z
+  for h in /sys/class/hwmon/hwmon*; do
+    [[ -r $h/name ]] || continue
+    name=$(cat "$h/name" 2>/dev/null || true)
+    case $name in
+      k10temp|coretemp|zenpower|cpu_thermal|soc_thermal|acpitz) ;;
+      *) continue ;;
+    esac
+    for f in "$h"/temp*_input; do
+      [[ -r $f ]] || continue
+      t=$(cat "$f" 2>/dev/null || true)
+      [[ $t =~ ^[0-9]+$ ]] || continue
+      if (( t > 1000 )); then t=$(( t / 1000 )); fi
+      printf '%s' "$t"
+      return 0
+    done
+  done
+  for z in /sys/class/thermal/thermal_zone*; do
+    [[ -r $z/temp && -r $z/type ]] || continue
+    case $(cat "$z/type" 2>/dev/null || true) in
+      *cpu*|*pkg*|*soc*|acpitz*|x86*) ;;
+      *) continue ;;
+    esac
+    t=$(cat "$z/temp" 2>/dev/null || true)
+    [[ $t =~ ^[0-9]+$ ]] || continue
+    if (( t > 1000 )); then t=$(( t / 1000 )); fi
+    printf '%s' "$t"
+    return 0
+  done
+  for z in /sys/class/thermal/thermal_zone*; do
+    [[ -r $z/temp ]] || continue
+    t=$(cat "$z/temp" 2>/dev/null || true)
+    [[ $t =~ ^[0-9]+$ ]] || continue
+    if (( t > 1000 )); then t=$(( t / 1000 )); fi
+    printf '%s' "$t"
+    return 0
+  done
+  return 1
+}
+
+temp_limit() {
+  local f t best=0
+  for f in /sys/class/thermal/thermal_zone*/trip_point_*_temp; do
+    [[ -r $f ]] || continue
+    t=$(cat "$f" 2>/dev/null || true)
+    [[ $t =~ ^[0-9]+$ ]] || continue
+    if (( t > 1000 )); then t=$(( t / 1000 )); fi
+    if (( t > best && t <= 130 )); then
+      best=$t
+    fi
+  done
+  if (( best > 0 )); then
+    printf '%s' "$best"
+  else
+    printf '100'
+  fi
+}
+
+bat_state() {
+  case $1 in
+    Full|'Not charging') printf '✓ sin sobrecarga' ;;
+    Charging) printf '⚡ cargando' ;;
+    Discharging) printf '↓ descargando' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+gpu=$(lspci 2>/dev/null | awk -F': ' '/VGA|3D controller|Display/{print $2; exit}' || true)
+gpu=$(gpu_short "$gpu")
+cpu_pct=$(cpu_usage)
+gpu_pct=$(gpu_usage || true)
+cpu_t=$(cpu_temp || true)
+t_limit=$(temp_limit)
+t_pct=0
+if [[ $cpu_t =~ ^[0-9]+$ ]] && (( t_limit > 0 )); then
+  t_pct=$(( cpu_t * 100 / t_limit ))
+fi
+t_color=$GRN
+if [[ $cpu_t =~ ^[0-9]+$ ]]; then
+  if (( cpu_t >= 85 )); then
+    t_color=$ORG
+  elif (( cpu_t >= 70 )); then
+    t_color=$YEL
+  fi
+fi
+
+bat_cap=''
+bat_status=''
+bat_limit=''
+for b in /sys/class/power_supply/BAT*; do
+  [[ -e $b ]] || continue
+  bat_cap=$(cat "$b/capacity" 2>/dev/null || true)
+  bat_status=$(cat "$b/status" 2>/dev/null || true)
+  if [[ -r $b/charge_control_end_threshold ]]; then
+    bat_limit=$(cat "$b/charge_control_end_threshold" 2>/dev/null || true)
+  fi
+  break
+done
+
+printf '\n  %s█▓▒░%s %s%sINFO-WC%s  %s%s@%s%s\n\n' \
+  "$C2" "$RST" "$BLD$C1" "$BLD" "$RST" "$DIM" "$USER" "$host" "$RST"
+
+line 'SISTEMA' "$os $arch"
+line 'KERNEL' "$kernel"
+line 'SHELL' "$shell_v"
+[[ -n $de ]] && line 'ENTORNO' "$de"
+line 'CPU' "$cpu_model (${cores}h)"
+[[ -n $gpu ]] && line 'GPU' "$gpu"
+line 'RED' "$(lan_info)"
+
+sep
+
+line 'ACTIVO' "$uptime_str"
+usage_line 'USO CPU' "$cpu_pct" "$BAR_CPU" "${cpu_mhz:+@ ${cpu_mhz}GHz}"
+if [[ $cpu_t =~ ^[0-9]+$ ]]; then
+  printf '  %s%-9s%s ' "$C1" 'TEMP' "$RST"
+  bar "$t_pct" "$BAR_W" "$t_color"
+  printf '  %s%d°C%s %s/ %d°C%s\n' "$DIM" "$cpu_t" "$RST" "$DIM" "$t_limit" "$RST"
+else
+  line 'TEMP' 'no disponible'
+fi
+if [[ $cores =~ ^[0-9]+$ ]] && (( cores > 0 )); then
+  load_pct=$(awk -v l="$l1" -v c="$cores" 'BEGIN{printf "%d", l * 100 / c}')
+  load_bar=$load_pct
+  if (( load_bar > 100 )); then load_bar=100; fi
+  if (( load_pct < 70 )); then
+    load_word='holgado'
+    load_color=$GRN
+  elif (( load_pct <= 100 )); then
+    load_word='normal'
+    load_color=$GRN
+  elif (( load_pct <= 150 )); then
+    load_word='ocupado'
+    load_color=$YEL
+  else
+    load_word='saturado'
+    load_color=$ORG
+  fi
+  printf '  %s%-9s%s ' "$C1" 'CARGA' "$RST"
+  bar "$load_bar" "$BAR_W" "$load_color"
+  printf '  %s%s%s  %s%s · %s%%%s\n' \
+    "$load_color" "$l1" "$RST" "$DIM" "$load_word" "$load_pct" "$RST"
+else
+  line 'CARGA' "$l1  $l2  $l3"
+fi
+
+printf '  %s%-9s%s ' "$C1" 'RAM' "$RST"
+bar "$mem_pct" "$BAR_W" "$BAR_RAM"
+printf '  %s / %s  %s%d%%%s\n' "$(human "$mem_used_b")" "$(human "$mem_total_b")" "$DIM" "$mem_pct" "$RST"
+
+if (( swap_total_b > 0 )); then
+  printf '  %s%-9s%s ' "$C1" 'SWAP' "$RST"
+  bar "$swap_pct" "$BAR_W" "$BAR_SWAP"
+  printf '  %s / %s  %s%d%%%s\n' "$(human "$swap_used_b")" "$(human "$swap_total_b")" "$DIM" "$swap_pct" "$RST"
+else
+  line 'SWAP' 'sin swap'
+fi
+
+if (( disk_ok )); then
+  printf '  %s%-9s%s ' "$C1" 'DISCO' "$RST"
+  bar "$disk_pct" "$BAR_W" "$BAR_DISK"
+  printf '  %s / %s  %s%d%%%s  %s%s%s\n' \
+    "$(human "$disk_used")" "$(human "$disk_size")" "$DIM" "$disk_pct" "$RST" "$DIM" "$disk_mp" "$RST"
+else
+  line 'DISCO' 'no disponible'
+fi
+
+if [[ -n $home_mp && $home_mp != "$disk_mp" ]]; then
+  hu=0 hs=0 hp=0
+  read -r hu hs hp < <(df -P -B1 "$HOME" 2>/dev/null | awk 'NR==2{print $3, $2, $5}') || true
+  hp=${hp%\%}
+  printf '  %s%-9s%s ' "$C1" 'HOME' "$RST"
+  bar "${hp:-0}" "$BAR_W" "$BAR_DISK"
+  printf '  %s / %s  %s%s%%%s  %s%s%s\n' \
+    "$(human "${hu:-0}")" "$(human "${hs:-0}")" "$DIM" "${hp:-0}" "$RST" "$DIM" "$home_mp" "$RST"
+fi
+
+if [[ -n $gpu && -n $gpu_pct ]]; then
+  usage_line 'USO GPU' "$gpu_pct" "$BAR_GPU"
+elif [[ -n $gpu ]]; then
+  line 'USO GPU' 'no disponible'
+fi
+
+if [[ -n $bat_cap ]]; then
+  bat_text=$(bat_state "$bat_status")
+  if [[ -n $bat_limit ]]; then bat_text+=" (límite ${bat_limit}%)"; fi
+  printf '  %s%-9s%s ' "$C1" 'BATERIA' "$RST"
+  bar "$bat_cap" "$BAR_W" "$BAR_BAT"
+  printf '  %s%d%%%s  %s%s%s\n' "$DIM" "$bat_cap" "$RST" "$DIM" "$bat_text" "$RST"
+fi
+
+if (( net )); then
+  pub=$(public_ip)
+  line 'PUBLICA' "${pub:-sin conexión}"
+else
+  line 'PUBLICA' 'desactivada (-n)'
+fi
+
+printf '\n'
