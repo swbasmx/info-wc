@@ -63,8 +63,8 @@ fg() {
       printf '\033[38;5;%dm' $(( 16 + 36 * rr + 6 * gg + bb ))
       ;;
     1)
-      if (( r + g + b > 420 )); then printf '\033[91m'
-      elif (( r + g + b > 180 )); then printf '\033[31m'
+      if (( r >= 200 )); then printf '\033[91m'
+      elif (( r + g + b > 120 )); then printf '\033[31m'
       else printf '\033[2;31m'; fi
       ;;
     *) printf '' ;;
@@ -79,12 +79,7 @@ else
   BLD=''
 fi
 
-C_LABEL=$(fg 205 60 95)
-C_VAL=$(fg 255 214 224)
-C_ACC=$(fg 255 0 60)
-C_HOT=$(fg 255 70 110)
-C_DIM=$(fg 140 35 60)
-C_TRACK=$(fg 80 18 32)
+C_RED=$(fg 255 0 0)
 
 tmp_cache=''
 cleanup() {
@@ -199,10 +194,6 @@ gpu_short() {
   shorten "$s" 52
 }
 
-host=${HOSTNAME:-$(hostname 2>/dev/null || echo desconocido)}
-os=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null || true)
-if [[ -z $os ]]; then os=$(uname -s 2>/dev/null || echo desconocido); fi
-arch=$(uname -m 2>/dev/null || true)
 kernel=$(uname -r 2>/dev/null || echo desconocido)
 shell_v="bash ${BASH_VERSION%%(*}"
 
@@ -215,9 +206,6 @@ uptime_str=''
 if (( d > 0 )); then uptime_str+="${d}d "; fi
 if (( d > 0 || h > 0 )); then uptime_str+="${h}h "; fi
 uptime_str+="${m}m"
-
-de=${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}
-if [[ $de == *:* ]]; then de=${de##*:}; fi
 
 cpu_model=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)
 if [[ -z $cpu_model ]]; then cpu_model=$(uname -m 2>/dev/null || echo desconocido); fi
@@ -341,14 +329,16 @@ public_ip() {
 }
 
 cpu_times() {
-  awk '/^cpu /{t=0; for(n=2;n<=9&&n<=NF;n++) t+=$n; print t, $5+$6; exit}' /proc/stat
+  local cpu u n s i w irq sirq st rest
+  read -r cpu u n s i w irq sirq st rest < /proc/stat || return 1
+  printf '%s %s\n' $(( u + n + s + i + w + irq + sirq + st )) $(( i + w ))
 }
 
 collect_cpu() {
   local pt=0 pi=0 ct=0 ci=0 dt di i
   read -r pt pi < <(cpu_times) || { pt=0; pi=0; }
   for (( i=0; i<8; i++ )); do
-    sleep 0.03
+    sleep 0.025
     read -r ct ci < <(cpu_times) || { ct=$pt; ci=$pi; }
     dt=$(( ct - pt ))
     di=$(( ci - pi ))
@@ -481,31 +471,6 @@ if [[ $cores =~ ^[0-9]+$ ]] && (( cores > 0 )); then
   load_pct=$(awk -v l="$l1" -v c="$cores" 'BEGIN{printf "%d", l * 100 / c}')
 fi
 
-F_I=("███" " █ " " █ " " █ " "███")
-F_N=("█  █" "██ █" "█ ██" "█  █" "█  █")
-F_F=("████" "█   " "███ " "█   " "█   ")
-F_O=(" ██ " "█  █" "█  █" "█  █" " ██ ")
-F_W=("█   █" "█   █" "█ █ █" "██ ██" "█   █")
-F_C=(" ███" "█   " "█   " "█   " " ███")
-
-HDR_COL=()
-for (( i=0; i<30; i++ )); do
-  t=$(( i * 100 / 29 ))
-  HDR_COL[i]=$(fg 255 $(( 0 + 120 * t / 100 )) $(( 60 + 90 * t / 100 )))
-done
-
-BAR_COL=()
-for (( i=0; i<BAR_W; i++ )); do
-  t=$(( i * 100 / (BAR_W - 1) ))
-  BAR_COL[i]=$(fg 255 $(( 0 + 110 * t / 100 )) $(( 60 + 90 * t / 100 )))
-done
-
-SPARK_COL=()
-for (( i=0; i<8; i++ )); do
-  t=$(( i * 100 / 7 ))
-  SPARK_COL[i]=$(fg 255 $(( 0 + 110 * t / 100 )) $(( 60 + 90 * t / 100 )))
-done
-
 GLYPH=(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
 
 draw_bar() {
@@ -513,11 +478,12 @@ draw_bar() {
   if (( pct < 0 )); then pct=0; fi
   if (( pct > 100 )); then pct=100; fi
   filled=$(( pct * w / 100 ))
+  printf '%s' "$C_RED"
   for (( i=0; i<w; i++ )); do
     if (( i < filled )); then
-      printf '%s▰' "${BAR_COL[i]}"
+      printf '▰'
     else
-      printf '%s▱' "$C_TRACK"
+      printf '▱'
     fi
   done
   printf '%s' "$RST"
@@ -527,11 +493,11 @@ trow() {
   local label=$1 pct=$2 detail=${3:-} max=$(( cols - 29 ))
   if (( max < 1 )); then max=1; fi
   detail=$(fit_detail "$detail" "$max")
-  printf '  %s%-5s%s ' "$C_LABEL" "$label" "$RST"
+  printf '  %s%-5s%s ' "$C_RED" "$label" "$RST"
   draw_bar "$pct" "$BAR_W"
-  printf ' %s%3d%%%s' "$C_HOT" "$pct" "$RST"
+  printf ' %s%3d%%%s' "$BLD$C_RED" "$pct" "$RST"
   if [[ -n $detail ]]; then
-    printf '  %s%s%s' "$C_VAL" "$detail" "$RST"
+    printf '  %s%s%s' "$BLD$C_RED" "$detail" "$RST"
   fi
   printf '\n'
 }
@@ -559,40 +525,22 @@ trow2() {
 
 hist_str() {
   local i idx
-  printf '  %s%-5s%s ' "$C_LABEL" 'Hist' "$RST"
+  printf '  %s%-5s%s %s' "$C_RED" 'Hist' "$RST" "$C_RED"
   for (( i=0; i<8; i++ )); do
     idx=$(( hist[i] * 7 / 100 ))
     if (( idx < 0 )); then idx=0; fi
     if (( idx > 7 )); then idx=7; fi
-    printf '%s%s' "${SPARK_COL[i]}" "${GLYPH[idx]}"
+    printf '%s' "${GLYPH[idx]}"
   done
   printf '%s\n' "$RST"
-}
-
-print_wordmark() {
-  local i x row ch
-  for i in 0 1 2 3 4; do
-    row="${F_I[i]} ${F_N[i]} ${F_F[i]} ${F_O[i]}  ${F_W[i]} ${F_C[i]}"
-    printf '  '
-    for (( x=0; x<${#row}; x++ )); do
-      ch=${row:x:1}
-      if [[ $ch == ' ' ]]; then
-        printf ' '
-      else
-        printf '%s%s' "${HDR_COL[x]}" "$ch"
-      fi
-    done
-    printf '%s\n' "$RST"
-    if (( anim )); then sleep 0.02; fi
-  done
 }
 
 draw_rule() {
   local w=$1 i n seg
   if (( anim )); then
-    for (( i=0; i<=14; i++ )); do
-      n=$(( w * i / 14 ))
-      printf '\r  %s' "$C_DIM"
+    for (( i=0; i<=10; i++ )); do
+      n=$(( w * i / 10 ))
+      printf '\r  %s' "$C_RED"
       printf -v seg '%*s' "$n" ''
       seg=${seg// /─}
       printf '%s%s\033[K' "$seg" "$RST"
@@ -600,7 +548,7 @@ draw_rule() {
     done
     printf '\n'
   else
-    printf '  %s' "$C_DIM"
+    printf '  %s' "$C_RED"
     printf -v seg '%*s' "$w" ''
     seg=${seg// /─}
     printf '%s%s\n' "$seg" "$RST"
@@ -609,29 +557,29 @@ draw_rule() {
 
 hdr2() {
   local l=$1 r=$2 lp rp pad
-  printf '  %s▌%s%s%s%s ' "$C_ACC" "$RST" "$BLD$C_HOT" "$l" "$RST"
+  printf '  %s▌%s%s%s%s ' "$C_RED" "$RST" "$BLD$C_RED" "$l" "$RST"
   lp=$(( LEFT_W - 4 - ${#l} ))
   if (( lp < 0 )); then lp=0; fi
   printf -v pad '%*s' "$lp" ''
   pad=${pad// /─}
-  printf '%s%s%s' "$C_DIM" "$pad" "$RST"
+  printf '%s%s%s' "$C_RED" "$pad" "$RST"
   printf '%*s' "$GAP" ''
-  printf '%s▌%s%s%s%s ' "$C_ACC" "$RST" "$BLD$C_HOT" "$r" "$RST"
+  printf '%s▌%s%s%s%s ' "$C_RED" "$RST" "$BLD$C_RED" "$r" "$RST"
   rp=$(( RIGHT_W - 4 - ${#r} ))
   if (( rp < 0 )); then rp=0; fi
   printf -v pad '%*s' "$rp" ''
   pad=${pad// /─}
-  printf '%s%s%s\n' "$C_DIM" "$pad" "$RST"
+  printf '%s%s%s\n' "$C_RED" "$pad" "$RST"
 }
 
 hdr1() {
   local l=$1 lp pad
-  printf '  %s▌%s%s%s%s ' "$C_ACC" "$RST" "$BLD$C_HOT" "$l" "$RST"
+  printf '  %s▌%s%s%s%s ' "$C_RED" "$RST" "$BLD$C_RED" "$l" "$RST"
   lp=$(( cols - 6 - ${#l} ))
   if (( lp < 0 )); then lp=0; fi
   printf -v pad '%*s' "$lp" ''
   pad=${pad// /─}
-  printf '%s%s%s\n' "$C_DIM" "$pad" "$RST"
+  printf '%s%s%s\n' "$C_RED" "$pad" "$RST"
 }
 
 sline2() {
@@ -641,10 +589,14 @@ sline2() {
   if (( lw < 1 )); then lw=1; fi
   if (( rw < 1 )); then rw=1; fi
   v1=$(shorten "$v1" "$lw")
+  if [[ -z $l2 ]]; then
+    printf '  %s%-7s%s %s%s%s\n' "$C_RED" "$l1" "$RST" "$BLD$C_RED" "$v1" "$RST"
+    return 0
+  fi
   v2=$(shorten "$v2" "$rw")
   printf '  %s%-7s%s %s%-*s%s   %s%-7s%s %s%-*s%s\n' \
-    "$C_LABEL" "$l1" "$RST" "$C_VAL" "$lw" "$v1" "$RST" \
-    "$C_LABEL" "$l2" "$RST" "$C_VAL" "$rw" "$v2" "$RST"
+    "$C_RED" "$l1" "$RST" "$BLD$C_RED" "$lw" "$v1" "$RST" \
+    "$C_RED" "$l2" "$RST" "$BLD$C_RED" "$rw" "$v2" "$RST"
 }
 
 sline1() {
@@ -652,7 +604,7 @@ sline1() {
   vw=$(( cols - 12 ))
   if (( vw < 1 )); then vw=1; fi
   v=$(shorten "$v" "$vw")
-  printf '  %s%-7s%s %s%s%s\n' "$C_LABEL" "$l" "$RST" "$C_VAL" "$v" "$RST"
+  printf '  %s%-7s%s %s%s%s\n' "$C_RED" "$l" "$RST" "$BLD$C_RED" "$v" "$RST"
 }
 
 cpu_detail=''
@@ -697,13 +649,17 @@ render_metrics() {
   fi
 }
 
-print_wordmark
-ident="${USER}@${host} · ${os} ${arch} · v${VERSION}"
-if [[ -n $de ]]; then ident+=" · ${de}"; fi
-printf '  %s◆%s %s%s%s\n' "$C_ACC" "$RST" "$C_VAL" "$(shorten "$ident" $(( cols - 6 )))" "$RST"
+pub=''
+if (( net )); then
+  pub=$(public_ip)
+  pub=${pub:-sin conexión}
+else
+  pub='desactivada (-n)'
+fi
 
 rule_w=$(( cols - 4 ))
 if (( rule_w > 76 )); then rule_w=76; fi
+printf '\n'
 draw_rule "$rule_w"
 printf '\n'
 
@@ -712,14 +668,15 @@ if (( wide )); then
   sline2 'Activo' "$uptime_str" 'CPU' "$cpu_model"
   sline2 'Shell' "$shell_v" 'GPU' "${gpu:-n/d}"
   sline2 'Kernel' "$kernel" 'LAN' "$(lan_info)"
+  sline2 'Núcleos' "$cores" 'Pública' "$pub"
   printf '\n'
   hdr2 'RENDIMIENTO' 'MEMORIA'
   if (( anim )); then
     render_metrics 0
-    for s in 14 28 42 56 70 84 100; do
+    for s in 16 33 50 66 83 100; do
       printf '\033[5A'
       render_metrics "$s"
-      sleep 0.035
+      sleep 0.03
     done
   else
     render_metrics 100
@@ -729,9 +686,11 @@ else
   sline1 'Activo' "$uptime_str"
   sline1 'Shell' "$shell_v"
   sline1 'Kernel' "$kernel"
+  sline1 'Núcleos' "$cores"
   sline1 'CPU' "$cpu_model"
   sline1 'GPU' "${gpu:-n/d}"
   sline1 'LAN' "$(lan_info)"
+  sline1 'Pública' "$pub"
   printf '\n'
   hdr1 'RENDIMIENTO'
   trow 'CPU' "$cpu_pct" "$cpu_detail"
@@ -749,13 +708,3 @@ else
   fi
   hist_str
 fi
-
-printf '\n'
-pub=''
-if (( net )); then
-  pub=$(public_ip)
-  pub=${pub:-sin conexión}
-else
-  pub='desactivada (-n)'
-fi
-printf '  %s◆%s %sIP pública%s  %s%s%s\n' "$C_ACC" "$RST" "$C_LABEL" "$RST" "$C_VAL" "$pub" "$RST"
