@@ -5,7 +5,7 @@ VERSION=1.0
 CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/info-wc
 CACHE_FILE=$CACHE_DIR/public-ip
 TTL=900
-BAR_W=16
+BAR_W=14
 
 refresh=0
 net=1
@@ -95,7 +95,17 @@ line() {
 }
 
 sep() {
-  printf '  %s%s%s\n' "$DIM" "$(printf '─%.0s' {1..46})" "$RST"
+  local w=${COLUMNS:-} line=''
+  if [[ ! $w =~ ^[0-9]+$ ]]; then
+    w=$(tput cols 2>/dev/null || echo 46)
+  fi
+  if [[ ! $w =~ ^[0-9]+$ ]]; then w=46; fi
+  if (( w > 80 )); then w=80; fi
+  if (( w < 20 )); then w=20; fi
+  w=$(( w - 2 ))
+  printf -v line '%*s' "$w" ''
+  line=${line// /─}
+  printf '  %s%s%s\n' "$DIM" "$line" "$RST"
 }
 
 meminfo() {
@@ -293,7 +303,7 @@ public_ip() {
 usage_line() {
   printf '  %s%-9s%s ' "$C1" "$1" "$RST"
   bar "$2" "$BAR_W" "${3:-}"
-  printf '  %s%d%%%s' "$DIM" "$2" "$RST"
+  printf '  %s%3d%%%s' "${3:-}" "$2" "$RST"
   if [[ -n ${4:-} ]]; then
     printf '  %s%s%s' "$DIM" "$4" "$RST"
   fi
@@ -451,7 +461,7 @@ usage_line 'USO CPU' "$cpu_pct" "$BAR_CPU" "${cpu_mhz:+@ ${cpu_mhz}GHz}"
 if [[ $cpu_t =~ ^[0-9]+$ ]]; then
   printf '  %s%-9s%s ' "$C1" 'TEMP' "$RST"
   bar "$t_pct" "$BAR_W" "$t_color"
-  printf '  %s%d°C%s %s/ %d°C%s\n' "$DIM" "$cpu_t" "$RST" "$DIM" "$t_limit" "$RST"
+  printf '  %s%d°C%s %s/ %d°C%s\n' "$t_color" "$cpu_t" "$RST" "$DIM" "$t_limit" "$RST"
 else
   line 'TEMP' 'no disponible'
 fi
@@ -480,23 +490,28 @@ else
   line 'CARGA' "$l1  $l2  $l3"
 fi
 
+printf '\n'
+
 printf '  %s%-9s%s ' "$C1" 'RAM' "$RST"
 bar "$mem_pct" "$BAR_W" "$BAR_RAM"
-printf '  %s / %s  %s%d%%%s\n' "$(human "$mem_used_b")" "$(human "$mem_total_b")" "$DIM" "$mem_pct" "$RST"
+printf '  %s%3d%%%s  %s / %s\n' "$BAR_RAM" "$mem_pct" "$RST" "$(human "$mem_used_b")" "$(human "$mem_total_b")"
+
 
 if (( swap_total_b > 0 )); then
   printf '  %s%-9s%s ' "$C1" 'SWAP' "$RST"
   bar "$swap_pct" "$BAR_W" "$BAR_SWAP"
-  printf '  %s / %s  %s%d%%%s\n' "$(human "$swap_used_b")" "$(human "$swap_total_b")" "$DIM" "$swap_pct" "$RST"
+  printf '  %s%3d%%%s  %s / %s\n' "$BAR_SWAP" "$swap_pct" "$RST" "$(human "$swap_used_b")" "$(human "$swap_total_b")"
 else
   line 'SWAP' 'sin swap'
 fi
 
+printf '\n'
+
 if (( disk_ok )); then
   printf '  %s%-9s%s ' "$C1" 'DISCO' "$RST"
   bar "$disk_pct" "$BAR_W" "$BAR_DISK"
-  printf '  %s / %s  %s%d%%%s  %s%s%s\n' \
-    "$(human "$disk_used")" "$(human "$disk_size")" "$DIM" "$disk_pct" "$RST" "$DIM" "$disk_mp" "$RST"
+  printf '  %s%3d%%%s  %s / %s  %s%s%s\n' \
+    "$BAR_DISK" "$disk_pct" "$RST" "$(human "$disk_used")" "$(human "$disk_size")" "$DIM" "$disk_mp" "$RST"
 else
   line 'DISCO' 'no disponible'
 fi
@@ -507,9 +522,11 @@ if [[ -n $home_mp && $home_mp != "$disk_mp" ]]; then
   hp=${hp%\%}
   printf '  %s%-9s%s ' "$C1" 'HOME' "$RST"
   bar "${hp:-0}" "$BAR_W" "$BAR_DISK"
-  printf '  %s / %s  %s%s%%%s  %s%s%s\n' \
-    "$(human "${hu:-0}")" "$(human "${hs:-0}")" "$DIM" "${hp:-0}" "$RST" "$DIM" "$home_mp" "$RST"
+  printf '  %s%3s%%%s  %s / %s  %s%s%s\n' \
+    "$BAR_DISK" "${hp:-0}" "$RST" "$(human "${hu:-0}")" "$(human "${hs:-0}")" "$DIM" "$home_mp" "$RST"
 fi
+
+printf '\n'
 
 if [[ -n $gpu && -n $gpu_pct ]]; then
   usage_line 'USO GPU' "$gpu_pct" "$BAR_GPU"
@@ -522,7 +539,7 @@ if [[ -n $bat_cap ]]; then
   if [[ -n $bat_limit ]]; then bat_text+=" (límite ${bat_limit}%)"; fi
   printf '  %s%-9s%s ' "$C1" 'BATERIA' "$RST"
   bar "$bat_cap" "$BAR_W" "$BAR_BAT"
-  printf '  %s%d%%%s  %s%s%s\n' "$DIM" "$bat_cap" "$RST" "$DIM" "$bat_text" "$RST"
+  printf '  %s%3s%%%s  %s%s%s\n' "$BAR_BAT" "$bat_cap" "$RST" "$DIM" "$bat_text" "$RST"
 fi
 
 if (( net )); then
