@@ -490,10 +490,11 @@ draw_bar() {
 }
 
 trow() {
-  local label=$1 pct=$2 detail=${3:-} max=$(( cols - 29 ))
+  local label=$1 pct=$2 detail=${3:-} max=$(( cols - 29 )) margin=${4:-1}
   if (( max < 1 )); then max=1; fi
   detail=$(fit_detail "$detail" "$max")
-  printf '  %s%-5s%s ' "$C_RED" "$label" "$RST"
+  if (( margin )); then printf '  '; fi
+  printf '%s%-5s%s ' "$C_RED" "$label" "$RST"
   draw_bar "$pct" "$BAR_W"
   printf ' %s%3d%%%s' "$BLD$C_RED" "$pct" "$RST"
   if [[ -n $detail ]]; then
@@ -519,7 +520,7 @@ trow2() {
     printf '%s\n' "$L"
     return 0
   fi
-  R=$(trow "$l2" "$p2" "$d2")
+  R=$(trow "$l2" "$p2" "$d2" 0)
   printf '%s%*s%s\n' "$L" "$pad" '' "$R"
 }
 
@@ -555,37 +556,41 @@ draw_rule() {
   fi
 }
 
+header_seg() {
+  local label=$1 width=$2 text left right fl fr
+  text=" ${label} "
+  left=$(( (width - ${#text}) / 2 ))
+  if (( left < 0 )); then left=0; fi
+  right=$(( width - ${#text} - left ))
+  if (( right < 0 )); then right=0; fi
+  printf '%s' "$C_RED"
+  printf -v fl '%*s' "$left" ''
+  fl=${fl// /─}
+  printf '%s' "$fl"
+  printf '%s%s%s%s' "$RST" "$BLD$C_RED" "$text" "$RST"
+  printf '%s' "$C_RED"
+  printf -v fr '%*s' "$right" ''
+  fr=${fr// /─}
+  printf '%s%s' "$fr" "$RST"
+}
 hdr2() {
-  local l=$1 r=$2 lp rp pad
-  printf '  %s▌%s%s%s%s ' "$C_RED" "$RST" "$BLD$C_RED" "$l" "$RST"
-  lp=$(( LEFT_W - 4 - ${#l} ))
-  if (( lp < 0 )); then lp=0; fi
-  printf -v pad '%*s' "$lp" ''
-  pad=${pad// /─}
-  printf '%s%s%s' "$C_RED" "$pad" "$RST"
+  printf '  '
+  header_seg "$1" $(( LEFT_W - 2 ))
   printf '%*s' "$GAP" ''
-  printf '%s▌%s%s%s%s ' "$C_RED" "$RST" "$BLD$C_RED" "$r" "$RST"
-  rp=$(( RIGHT_W - 4 - ${#r} ))
-  if (( rp < 0 )); then rp=0; fi
-  printf -v pad '%*s' "$rp" ''
-  pad=${pad// /─}
-  printf '%s%s%s\n' "$C_RED" "$pad" "$RST"
+  header_seg "$2" "$RIGHT_W"
+  printf '\n'
 }
 
 hdr1() {
-  local l=$1 lp pad
-  printf '  %s▌%s%s%s%s ' "$C_RED" "$RST" "$BLD$C_RED" "$l" "$RST"
-  lp=$(( cols - 6 - ${#l} ))
-  if (( lp < 0 )); then lp=0; fi
-  printf -v pad '%*s' "$lp" ''
-  pad=${pad// /─}
-  printf '%s%s%s\n' "$C_RED" "$pad" "$RST"
+  printf '  '
+  header_seg "$1" $(( cols - 4 ))
+  printf '\n'
 }
 
 sline2() {
   local l1=$1 v1=$2 l2=$3 v2=$4 lw rw
   lw=$(( LEFT_W - 10 ))
-  rw=$(( RIGHT_W - 10 ))
+  rw=$(( RIGHT_W - 8 ))
   if (( lw < 1 )); then lw=1; fi
   if (( rw < 1 )); then rw=1; fi
   v1=$(shorten "$v1" "$lw")
@@ -642,7 +647,7 @@ render_metrics() {
   if (( home_sep )); then
     pad=$(( LEFT_W + GAP - ll ))
     if (( pad < 2 )); then pad=2; fi
-    R=$(trow 'Home' $(( home_pct * s / 100 )) "$home_detail")
+    R=$(trow 'Home' $(( home_pct * s / 100 )) "$home_detail" 0)
     printf '%s%*s%s\n' "$L" "$pad" '' "$R"
   else
     printf '%s\n' "$L"
