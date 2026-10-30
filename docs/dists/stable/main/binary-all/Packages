@@ -7,11 +7,11 @@ Maintainer: swbasmx <swbasmx@localhost>
 Installed-Size: 56
 Depends: bash (>= 4), coreutils, gawk | mawk, sed, iproute2, hostname, curl, pciutils, ncurses-bin
 Filename: pool/main/i/info-wc/info-wc_3.0_all.deb
-Size: 7710
-MD5sum: 32333e46d886e342806f659a336cc061
-SHA1: 122242ebe0e734f71596fc6900ab2fc41d4c77dd
-SHA256: 8d68d92205dcb34e03e25dba20c24fe87608e8f3b6ac163f46fd89fac8e2936d
-SHA512: 271acf8db6314433458bce0d0aeee170184a02446f6c42685415e47c7a0056f6b08ebf6cba8be0824a227be35f397c3bc46c6403626c59422e815b58dc5818eb
+Size: 7722
+MD5sum: e9659323a33925792c714a1c81a1d446
+SHA1: d067fc05d7426965fe3e104f2d1cdf24c4a7a773
+SHA256: ac0b0c93bacdacfff3140434a870d0cf8fc3c2ad8011a868a904c408c14103b7
+SHA512: 9a55909fa6884d2c392acafc50fd585c38598f3d164cba443de5385c69b640c561ee4ea6ee23821a88d0bdba3ff968efe4dc26c8b6104c9c904cc809cc0e7636
 Homepage: https://github.com/swbasmx/info-wc
 Description: Panel de sistema para terminal en rojo neón
  Muestra sistema, hardware, rendimiento y memoria en una
