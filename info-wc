@@ -12,8 +12,69 @@ net=1
 anim=1
 anim_time=0.3
 
+detect_lang() {
+  local l=${LC_ALL:-${LC_MESSAGES:-${LANGUAGE:-${LANG:-}}}}
+  l=${l%%:*}
+  l=${l%%.*}
+  case $l in
+    es*) printf 'es' ;;
+    en*) printf 'en' ;;
+    *) printf 'en' ;;
+  esac
+}
+
+lang=${INFO_WC_LANG:-$(detect_lang)}
+case $lang in
+  es|en) ;;
+  *) lang=en ;;
+esac
+
+t() {
+  case "$lang:$1" in
+    es:system) printf 'SISTEMA' ;;
+    en:system) printf 'SYSTEM' ;;
+    es:hardware) printf 'HARDWARE' ;;
+    en:hardware) printf 'HARDWARE' ;;
+    es:performance) printf 'RENDIMIENTO' ;;
+    en:performance) printf 'PERFORMANCE' ;;
+    es:memory) printf 'MEMORIA' ;;
+    en:memory) printf 'MEMORY' ;;
+    es:uptime) printf 'Activo' ;;
+    en:uptime) printf 'Uptime' ;;
+    es:cores) printf 'Núcleos' ;;
+    en:cores) printf 'Cores' ;;
+    es:public) printf 'Pública' ;;
+    en:public) printf 'Public' ;;
+    es:load) printf 'Carga' ;;
+    en:load) printf 'Load' ;;
+    es:disk) printf 'Disco' ;;
+    en:disk) printf 'Disk' ;;
+    es:offline) printf 'sin conexión' ;;
+    en:offline) printf 'offline' ;;
+    es:disabled_net) printf 'desactivada (-n)' ;;
+    en:disabled_net) printf 'disabled (-n)' ;;
+    es:na) printf 'n/d' ;;
+    en:na) printf 'n/a' ;;
+    es:full) printf 'llena' ;;
+    en:full) printf 'full' ;;
+    es:charging) printf 'cargando' ;;
+    en:charging) printf 'charging' ;;
+    es:discharging) printf 'descarga' ;;
+    en:discharging) printf 'discharging' ;;
+    es:missing_value) printf 'falta el valor de' ;;
+    en:missing_value) printf 'missing value for' ;;
+    es:invalid_time) printf 'tiempo inválido' ;;
+    en:invalid_time) printf 'invalid time' ;;
+    es:unsupported_lang) printf 'idioma no soportado (usa es o en)' ;;
+    en:unsupported_lang) printf 'unsupported language (use es or en)' ;;
+    es:unknown_option) printf 'opción desconocida' ;;
+    en:unknown_option) printf 'unknown option' ;;
+  esac
+}
+
 usage() {
-  cat <<'EOF'
+  if [[ $lang == es ]]; then
+    cat <<'EOF'
 info-wc - resumen del sistema estilo neofetch, en rojo neón
 
 uso: info-wc [opciones]
@@ -22,9 +83,25 @@ uso: info-wc [opciones]
   -n, --no-net    no consulta la IP pública
   -q, --no-anim   sin animación (salida estática)
   -t, --time S    duración de la animación en segundos (0 la desactiva)
+  -l, --lang L    idioma: es o en (por defecto, según LANG)
   -V, --version   muestra la versión
   -h, --help      muestra esta ayuda
 EOF
+  else
+    cat <<'EOF'
+info-wc - neofetch-style system summary in neon red
+
+usage: info-wc [options]
+
+  -r, --refresh   ignore the cache and refresh the public IP
+  -n, --no-net    do not query the public IP
+  -q, --no-anim   disable the animation (static output)
+  -t, --time S    animation duration in seconds (0 disables it)
+  -l, --lang L    language: es or en (default: from LANG)
+  -V, --version   show version
+  -h, --help      show this help
+EOF
+  fi
 }
 
 while (( $# )); do
@@ -32,15 +109,22 @@ while (( $# )); do
     -r|--refresh) refresh=1; shift ;;
     -n|--no-net)  net=0; shift ;;
     -q|--no-anim) anim=0; shift ;;
+    -l|--lang)
+      [[ $# -ge 2 ]] || { printf 'info-wc: %s %s\n' "$(t missing_value)" "$1" >&2; exit 2; }
+      case $2 in
+        es|en) lang=$2 ;;
+        *) printf 'info-wc: %s: %s\n' "$(t unsupported_lang)" "$2" >&2; exit 2 ;;
+      esac
+      shift 2 ;;
     -t|--time)
-      [[ $# -ge 2 ]] || { printf 'info-wc: falta el valor de %s\n' "$1" >&2; exit 2; }
+      [[ $# -ge 2 ]] || { printf 'info-wc: %s %s\n' "$(t missing_value)" "$1" >&2; exit 2; }
       anim_time=$2
-      [[ $anim_time =~ ^[0-9]+([.][0-9]+)?$ ]] || { printf 'info-wc: tiempo inválido: %s\n' "$anim_time" >&2; exit 2; }
+      [[ $anim_time =~ ^[0-9]+([.][0-9]+)?$ ]] || { printf 'info-wc: %s: %s\n' "$(t invalid_time)" "$anim_time" >&2; exit 2; }
       if [[ $anim_time =~ ^0+([.]0+)?$ ]]; then anim=0; else anim=1; fi
       shift 2 ;;
     -V|--version) printf 'info-wc %s\n' "$VERSION"; exit 0 ;;
     -h|--help)    usage; exit 0 ;;
-    *) printf 'info-wc: opción desconocida: %s\n' "$1" >&2; exit 2 ;;
+    *) printf 'info-wc: %s: %s\n' "$(t unknown_option)" "$1" >&2; exit 2 ;;
   esac
 done
 
@@ -294,7 +378,7 @@ lan_info() {
   if [[ -z $out ]]; then
     out=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
   fi
-  printf '%s' "${out:-sin conexión}"
+  printf '%s' "${out:-$(t offline)}"
 }
 
 valid_ip() {
@@ -448,9 +532,9 @@ temp_limit() {
 
 bat_state() {
   case $1 in
-    Full|'Not charging') printf 'llena' ;;
-    Charging) printf 'cargando' ;;
-    Discharging) printf 'descarga' ;;
+    Full|'Not charging') t full ;;
+    Charging) t charging ;;
+    Discharging) t discharging ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -630,13 +714,13 @@ sline1() {
 cpu_detail=''
 if [[ -n $cpu_mhz ]]; then cpu_detail="@${cpu_mhz}GHz"; fi
 gpu_detail=''
-if [[ -z $gpu_pct ]]; then gpu_detail='n/d'; fi
-temp_detail='n/d'
+if [[ -z $gpu_pct ]]; then gpu_detail=$(t na); fi
+temp_detail=$(t na)
 if [[ $cpu_t =~ ^[0-9]+$ ]]; then temp_detail="${cpu_t}/${t_limit}°C"; fi
 ram_detail="$(human "$mem_used_b")/$(human "$mem_total_b")"
 swap_detail='sin swap'
 if (( swap_total_b > 0 )); then swap_detail="$(human "$swap_used_b")/$(human "$swap_total_b")"; fi
-disk_detail='n/d'
+disk_detail=$(t na)
 if (( disk_ok )); then disk_detail="$(human "$disk_used")/$(human "$disk_size")"; fi
 bat_detail=''
 if [[ -n $bat_cap ]]; then
@@ -650,7 +734,7 @@ render_metrics() {
   local s=$1
   trow2 'CPU' $(( cpu_pct * s / 100 )) "$cpu_detail" 'RAM' $(( mem_pct * s / 100 )) "$ram_detail"
   trow2 'Temp' $(( t_pct * s / 100 )) "$temp_detail" 'SWAP' $(( swap_pct * s / 100 )) "$swap_detail"
-  trow2 'Carga' $(( load_pct * s / 100 )) "$l1" 'Disco' $(( disk_pct * s / 100 )) "$disk_detail"
+  trow2 "$(t load)" $(( load_pct * s / 100 )) "$l1" "$(t disk)" $(( disk_pct * s / 100 )) "$disk_detail"
   if [[ -n $bat_cap ]]; then
     trow2 'GPU' $(( ${gpu_pct:-0} * s / 100 )) "$gpu_detail" 'Bat' $(( bat_cap * s / 100 )) "$bat_detail"
   else
@@ -672,9 +756,9 @@ render_metrics() {
 pub=''
 if (( net )); then
   pub=$(public_ip)
-  pub=${pub:-sin conexión}
+  pub=${pub:-$(t offline)}
 else
-  pub='desactivada (-n)'
+  pub=$(t disabled_net)
 fi
 
 rule_w=$(( cols - 4 ))
@@ -684,13 +768,13 @@ draw_rule "$rule_w"
 printf '\n'
 
 if (( wide )); then
-  hdr2 'SISTEMA' 'HARDWARE'
-  sline2 'Activo' "$uptime_str" 'CPU' "$cpu_model"
-  sline2 'Shell' "$shell_v" 'GPU' "${gpu:-n/d}"
+  hdr2 "$(t system)" 'HARDWARE'
+  sline2 "$(t uptime)" "$uptime_str" 'CPU' "$cpu_model"
+  sline2 'Shell' "$shell_v" 'GPU' "${gpu:-$(t na)}"
   sline2 'Kernel' "$kernel" 'LAN' "$(lan_info)"
-  sline2 'Núcleos' "$cores" 'Pública' "$pub"
+  sline2 "$(t cores)" "$cores" "$(t public)" "$pub"
   printf '\n'
-  hdr2 'RENDIMIENTO' 'MEMORIA'
+  hdr2 "$(t performance)" "$(t memory)"
   if (( anim )); then
     render_metrics 0
     for s in 16 33 50 66 83 100; do
@@ -702,24 +786,24 @@ if (( wide )); then
     render_metrics 100
   fi
 else
-  hdr1 'SISTEMA'
-  sline1 'Activo' "$uptime_str"
+  hdr1 "$(t system)"
+  sline1 "$(t uptime)" "$uptime_str"
   sline1 'Shell' "$shell_v"
   sline1 'Kernel' "$kernel"
-  sline1 'Núcleos' "$cores"
+  sline1 "$(t cores)" "$cores"
   sline1 'CPU' "$cpu_model"
-  sline1 'GPU' "${gpu:-n/d}"
+  sline1 'GPU' "${gpu:-$(t na)}"
   sline1 'LAN' "$(lan_info)"
-  sline1 'Pública' "$pub"
+  sline1 "$(t public)" "$pub"
   printf '\n'
-  hdr1 'RENDIMIENTO'
+  hdr1 "$(t performance)"
   trow 'CPU' "$cpu_pct" "$cpu_detail"
   trow 'Temp' "$t_pct" "$temp_detail"
-  trow 'Carga' "$load_pct" "$l1"
+  trow "$(t load)" "$load_pct" "$l1"
   trow 'GPU' "${gpu_pct:-0}" "$gpu_detail"
   trow 'RAM' "$mem_pct" "$ram_detail"
   trow 'SWAP' "$swap_pct" "$swap_detail"
-  trow 'Disco' "$disk_pct" "$disk_detail"
+  trow "$(t disk)" "$disk_pct" "$disk_detail"
   if (( home_sep )); then
     trow 'Home' "$home_pct" "$home_detail"
   fi

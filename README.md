@@ -25,6 +25,7 @@ Repositorio: <https://github.com/swbasmx/info-wc>
 - **Dos columnas adaptativas**: a partir de 78 columnas; una sola columna en terminales angostas.
 - **Barras animadas** para CPU, temperatura, carga, GPU, RAM, swap, disco y batería.
 - **Duración de animación ajustable** con `-t SEGUNDOS`.
+- **Idioma automático**: detecta `LANG`/`LC_ALL` y permite forzar `es` o `en` con `-l`.
 - **Sparkline de CPU** con las últimas 8 muestras.
 - **Datos útiles**: kernel, shell, uptime, CPU, GPU, LAN, IP pública, temperatura y batería.
 - **Caché de IP pública** con TTL de 15 minutos; `-r` fuerza la actualización.
@@ -33,6 +34,10 @@ Repositorio: <https://github.com/swbasmx/info-wc>
 - **Respeta tu terminal**: `NO_COLOR`, `TERM=dumb`, redirecciones y el flag `-q`.
 
 ## Capturas
+
+<p align="center">
+  <img src="assets/demo.gif" alt="Animación de info-wc" width="100%">
+</p>
 
 <p align="center">
   <img src="assets/preview-wide.png" alt="info-wc en una terminal de 80 columnas" width="100%">
@@ -113,6 +118,7 @@ También puedes ejecutarlo directamente desde el repo:
 ```bash
 info-wc          # panel animado
 info-wc -t 1.5   # animación de 1.5 segundos
+info-wc -l en    # salida en inglés
 info-wc -q       # sin animación
 info-wc -n       # sin consultar la IP pública
 info-wc -r       # refresca la IP pública
@@ -126,6 +132,7 @@ info-wc -h       # ayuda
 | `-n`, `--no-net` | No consulta la IP pública. |
 | `-q`, `--no-anim` | Desactiva la animación y deja una salida estática. |
 | `-t`, `--time S` | Duración de la animación en segundos (por defecto `0.3`). `0` la desactiva. |
+| `-l`, `--lang L` | Idioma: `es` o `en`. Por defecto se detecta desde `LANG`/`LC_ALL`. |
 | `-V`, `--version` | Muestra la versión. |
 | `-h`, `--help` | Muestra la ayuda. |
 
@@ -153,6 +160,7 @@ Elimina `~/.local/bin/info-wc` y el bloque marcado de `~/.bashrc`. No toca el re
 - **Barras**: `▰` para lo lleno y `▱` para lo vacío; 10 celdas por barra.
 - **Animación**: dibuja la regla superior y rellena las barras en 6 pasos; usa `\033[5A` para redibujar sin parpadeo. `-t` ajusta la duración total.
 - **Color**: truecolor `255;0;0`, fallback a `196` en 256 colores y `91` en 16 colores. Se desactiva si no hay TTY, si `NO_COLOR` está definido o si `TERM=dumb`.
+- **Idioma**: detecta `LC_ALL`, `LC_MESSAGES`, `LANGUAGE` o `LANG`; `-l es|en` lo fuerza. También puedes usar `INFO_WC_LANG`.
 - **Caché**: la IP pública se guarda en `${XDG_CACHE_HOME:-$HOME/.cache}/info-wc/public-ip` durante 15 minutos.
 
 ## Personalización
