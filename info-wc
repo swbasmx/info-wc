@@ -10,6 +10,7 @@ BAR_W=10
 refresh=0
 net=1
 anim=1
+anim_time=0.3
 
 usage() {
   cat <<'EOF'
@@ -20,6 +21,7 @@ uso: info-wc [opciones]
   -r, --refresh   ignora la caché y vuelve a consultar la IP pública
   -n, --no-net    no consulta la IP pública
   -q, --no-anim   sin animación (salida estática)
+  -t, --time S    duración de la animación en segundos (0 la desactiva)
   -V, --version   muestra la versión
   -h, --help      muestra esta ayuda
 EOF
@@ -30,6 +32,12 @@ while (( $# )); do
     -r|--refresh) refresh=1; shift ;;
     -n|--no-net)  net=0; shift ;;
     -q|--no-anim) anim=0; shift ;;
+    -t|--time)
+      [[ $# -ge 2 ]] || { printf 'info-wc: falta el valor de %s\n' "$1" >&2; exit 2; }
+      anim_time=$2
+      [[ $anim_time =~ ^[0-9]+([.][0-9]+)?$ ]] || { printf 'info-wc: tiempo inválido: %s\n' "$anim_time" >&2; exit 2; }
+      if [[ $anim_time =~ ^0+([.]0+)?$ ]]; then anim=0; else anim=1; fi
+      shift 2 ;;
     -V|--version) printf 'info-wc %s\n' "$VERSION"; exit 0 ;;
     -h|--help)    usage; exit 0 ;;
     *) printf 'info-wc: opción desconocida: %s\n' "$1" >&2; exit 2 ;;
@@ -51,6 +59,13 @@ if (( is_tty )) && [[ -z ${NO_COLOR:-} && ${TERM:-} != dumb ]]; then
 fi
 
 if (( ! is_tty || ! color_mode )); then anim=0; fi
+
+anim_rule_delay=0
+anim_bar_delay=0
+if (( anim )); then
+  anim_rule_delay=$(awk -v t="$anim_time" 'BEGIN{printf "%.6f", t * 0.25 / 11}')
+  anim_bar_delay=$(awk -v t="$anim_time" 'BEGIN{printf "%.6f", t * 0.75 / 6}')
+fi
 
 fg() {
   local r=$1 g=$2 b=$3
@@ -545,7 +560,7 @@ draw_rule() {
       printf -v seg '%*s' "$n" ''
       seg=${seg// /─}
       printf '%s%s\033[K' "$seg" "$RST"
-      sleep 0.006
+      sleep "$anim_rule_delay"
     done
     printf '\n'
   else
@@ -681,7 +696,7 @@ if (( wide )); then
     for s in 16 33 50 66 83 100; do
       printf '\033[5A'
       render_metrics "$s"
-      sleep 0.03
+      sleep "$anim_bar_delay"
     done
   else
     render_metrics 100

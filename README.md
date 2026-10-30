@@ -24,6 +24,7 @@ Repositorio: <https://github.com/swbasmx/info-wc>
 - **Rojo neón real**: `#FF0000` en truecolor, con fallback a 256 y 16 colores.
 - **Dos columnas adaptativas**: a partir de 78 columnas; una sola columna en terminales angostas.
 - **Barras animadas** para CPU, temperatura, carga, GPU, RAM, swap, disco y batería.
+- **Duración de animación ajustable** con `-t SEGUNDOS`.
 - **Sparkline de CPU** con las últimas 8 muestras.
 - **Datos útiles**: kernel, shell, uptime, CPU, GPU, LAN, IP pública, temperatura y batería.
 - **Caché de IP pública** con TTL de 15 minutos; `-r` fuerza la actualización.
@@ -65,21 +66,26 @@ Repositorio: <https://github.com/swbasmx/info-wc>
 ## Instalación
 
 ```bash
-git clone https://github.com/swbasmx/info-wc.git
-cd info-wc
-./install.sh
+curl -fsSLO https://raw.githubusercontent.com/swbasmx/info-wc/main/install.sh
+sudo bash install.sh
 ```
 
-El instalador:
+El instalador descarga `info-wc` desde el repo, lo copia a `~/.local/bin/info-wc` y añade un bloque marcado a `~/.bashrc` para ejecutarlo al abrir una terminal interactiva. No duplica el bloque si ya existe.
 
-- copia `info-wc` a `~/.local/bin/info-wc`;
-- añade un bloque marcado a `~/.bashrc` para ejecutarlo al abrir una terminal interactiva;
-- no duplica el bloque si ya existe.
+Si lo ejecutas con `sudo`, instala para el usuario que lo invocó, no para `root`.
 
 Abre una terminal nueva o recarga tu configuración:
 
 ```bash
 source ~/.bashrc
+```
+
+### Desde el repo
+
+```bash
+git clone https://github.com/swbasmx/info-wc.git
+cd info-wc
+./install.sh
 ```
 
 ### Sin autoarranque
@@ -106,6 +112,7 @@ También puedes ejecutarlo directamente desde el repo:
 
 ```bash
 info-wc          # panel animado
+info-wc -t 1.5   # animación de 1.5 segundos
 info-wc -q       # sin animación
 info-wc -n       # sin consultar la IP pública
 info-wc -r       # refresca la IP pública
@@ -118,10 +125,18 @@ info-wc -h       # ayuda
 | `-r`, `--refresh` | Ignora la caché y vuelve a consultar la IP pública. |
 | `-n`, `--no-net` | No consulta la IP pública. |
 | `-q`, `--no-anim` | Desactiva la animación y deja una salida estática. |
+| `-t`, `--time S` | Duración de la animación en segundos (por defecto `0.3`). `0` la desactiva. |
 | `-V`, `--version` | Muestra la versión. |
 | `-h`, `--help` | Muestra la ayuda. |
 
 ## Desinstalación
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/swbasmx/info-wc/main/uninstall.sh
+sudo bash uninstall.sh
+```
+
+También puedes ejecutarlo desde el repo:
 
 ```bash
 cd info-wc
@@ -136,7 +151,7 @@ Elimina `~/.local/bin/info-wc` y el bloque marcado de `~/.bashrc`. No toca el re
 - **Layout**: con 78+ columnas usa dos columnas: 34 para la izquierda, 3 de separación y el resto para la derecha. Si no, apila todo en una columna.
 - **Cabeceras**: líneas `─` con la etiqueta centrada y en negrita.
 - **Barras**: `▰` para lo lleno y `▱` para lo vacío; 10 celdas por barra.
-- **Animación**: dibuja la regla superior y rellena las barras en 6 pasos; usa `\033[5A` para redibujar sin parpadeo.
+- **Animación**: dibuja la regla superior y rellena las barras en 6 pasos; usa `\033[5A` para redibujar sin parpadeo. `-t` ajusta la duración total.
 - **Color**: truecolor `255;0;0`, fallback a `196` en 256 colores y `91` en 16 colores. Se desactiva si no hay TTY, si `NO_COLOR` está definido o si `TERM=dumb`.
 - **Caché**: la IP pública se guarda en `${XDG_CACHE_HOME:-$HOME/.cache}/info-wc/public-ip` durante 15 minutos.
 

@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+die() {
+  printf 'uninstall.sh: %s\n' "$*" >&2
+  exit 1
+}
+
+if [[ ${EUID:-$(id -u)} -eq 0 && -n ${SUDO_USER:-} && ${SUDO_USER:-} != root ]]; then
+  target_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+  [[ -n $target_home ]] || die "no se pudo obtener el HOME de $SUDO_USER"
+  script_path=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")
+  exec sudo -u "$SUDO_USER" env HOME="$target_home" USER="$SUDO_USER" LOGNAME="$SUDO_USER" bash "$script_path" "$@"
+fi
+
 : "${HOME:?uninstall.sh: HOME no está definido}"
 
 PREFIX=${PREFIX:-"$HOME/.local/bin"}
@@ -8,11 +20,6 @@ BASHRC=${BASHRC:-"$HOME/.bashrc"}
 BIN=$PREFIX/info-wc
 MARK_BEGIN='# >>> info-wc >>>'
 MARK_END='# <<< info-wc <<<'
-
-die() {
-  printf 'uninstall.sh: %s\n' "$*" >&2
-  exit 1
-}
 
 [[ $PREFIX == /* ]] || die 'PREFIX debe ser una ruta absoluta'
 [[ $BASHRC == /* ]] || die 'BASHRC debe ser una ruta absoluta'
