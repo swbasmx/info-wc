@@ -1,49 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${HOME:?install.sh: HOME no está definido}"
-
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-PREFIX=${PREFIX:-"$HOME/.local/bin"}
-BASHRC=${BASHRC:-"$HOME/.bashrc"}
-SRC=$SCRIPT_DIR/info-wc
-BIN=$PREFIX/info-wc
-MARK_BEGIN='# >>> info-wc >>>'
-MARK_END='# <<< info-wc <<<'
+REPO_URL=${REPO_URL:-https://swbasmx.github.io/info-wc}
+SUITE=${SUITE:-stable}
+SOURCES_FILE=${SOURCES_FILE:-/etc/apt/sources.list.d/info-wc.list}
 
 die() {
   printf 'install.sh: %s\n' "$*" >&2
   exit 1
 }
 
-[[ $PREFIX == /* ]] || die 'PREFIX debe ser una ruta absoluta'
-[[ $BASHRC == /* ]] || die 'BASHRC debe ser una ruta absoluta'
-[[ -f $SRC ]] || die "no se encontró $SRC"
-[[ -s $SRC ]] || die "$SRC está vacío"
+[[ ${EUID:-$(id -u)} -eq 0 ]] || die 'ejecuta con sudo: sudo ./install.sh'
+[[ -r /etc/os-release ]] || die 'no se encontró /etc/os-release'
 
-if [[ -L $BASHRC ]]; then
-  BASHRC=$(readlink -f -- "$BASHRC") || die "no se pudo resolver $BASHRC"
-fi
+. /etc/os-release
 
-install -d -m 755 -- "$PREFIX"
-install -m 755 -- "$SRC" "$BIN"
+case "${ID:-} ${ID_LIKE:-}" in
+  *debian*|*ubuntu*) ;;
+  *) die "solo se soportan Debian/Ubuntu (detectado: ${PRETTY_NAME:-desconocido})" ;;
+esac
 
-if grep -qF -- "$MARK_BEGIN" "$BASHRC" 2>/dev/null; then
-  printf 'info-wc: el bloque ya existe en %s; no se duplicó.\n' "$BASHRC"
-else
-  [[ -e $BASHRC ]] || : > "$BASHRC"
-  if [[ -s $BASHRC ]] && [[ $(tail -c 1 -- "$BASHRC" | wc -l) -eq 0 ]]; then
-    printf '\n' >> "$BASHRC"
-  fi
-  {
-    printf '%s\n' "$MARK_BEGIN"
-    printf 'if [[ $- == *i* && -x %q ]]; then\n' "$BIN"
-    printf '  %q\n' "$BIN"
-    printf '%s\n' 'fi'
-    printf '%s\n' "$MARK_END"
-  } >> "$BASHRC"
-  printf 'info-wc: bloque añadido a %s; se ejecutará al abrir una terminal interactiva.\n' "$BASHRC"
-fi
+command -v apt-get >/dev/null 2>&1 || die 'apt-get no está disponible'
 
-printf 'info-wc instalado en %s\n' "$BIN"
-printf 'Abre una terminal nueva o ejecuta: source %s\n' "$BASHRC"
+printf 'Distro detectada: %s\n' "${PRETTY_NAME:-${ID:-desconocida}}"
+
+export DEBIAN_FRONTEND=noninteractive
+export APT_LISTCHANGES_FRONTEND=none
+
+apt-get update
+apt-get install -y --no-install-recommends ca-certificates
+
+printf 'deb [trusted=yes] %s %s main\n' "$REPO_URL" "$SUITE" > "$SOURCES_FILE"
+chmod 644 -- "$SOURCES_FILE"
+
+apt-get update
+apt-get install -y info-wc
+
+printf '\ninfo-wc instalado desde %s\n' "$REPO_URL"
+printf 'Se mostrará al iniciar una shell de login.\n'
+printf 'Para verlo ahora: info-wc\n'

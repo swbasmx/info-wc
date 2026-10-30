@@ -1,0 +1,19 @@
+Architectures: all
+Codename: stable
+Components: main
+Date: Fri, 30 Oct 2026 22:23:08 +0000
+Label: info-wc
+Origin: info-wc
+Suite: stable
+MD5Sum:
+ c60faec9994657fbeefdb9c45a1eccde              816 main/binary-all/Packages
+ a3dbe4616d58459dd273a9e01d96fcca              590 main/binary-all/Packages.gz
+SHA1:
+ f5f685ff1ba45efd1e7e385250a63acb292cf17a              816 main/binary-all/Packages
+ d1818b5c71e3458a8e703a58d2d992593565e2af              590 main/binary-all/Packages.gz
+SHA256:
+ 67ffb2cdae7a2e7cec784ed85a1d41e5ee5a05f6578220f2b29cecb43113b7ea              816 main/binary-all/Packages
+ 342ae49367f44274b8df812e06151b56f68ea11014d9324f31766e687beef000              590 main/binary-all/Packages.gz
+SHA512:
+ 09b158fcaa96f8e961335bf3e70dc48783a22adcaedf5407bf9451070240278b50c73d58669ea1a91608fdf5b5d5725f7d08ca3b25bcf1de458e510aa4222b45              816 main/binary-all/Packages
+ 2d8fe23a9a6532a43911cc7453d3aaa28a07d85f280ae02f70bc57fb584986f2afedf09676a418a3ad7b8e056ac97be800417fb227573bd4376cc69e33a655be              590 main/binary-all/Packages.gz
