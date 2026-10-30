@@ -4,8 +4,7 @@
 
 <p align="center">
   <a href="#instalación"><img src="https://img.shields.io/badge/bash-4%2B-4EAA25?logo=gnubash&logoColor=white" alt="Bash 4+"></a>
-  <a href="#instalación"><img src="https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-FF0000?logo=debian&logoColor=white" alt="Debian / Ubuntu"></a>
-  <a href="#instalación"><img src="https://img.shields.io/badge/apt-repositorio-FF0000" alt="Repositorio APT"></a>
+  <a href="#requisitos"><img src="https://img.shields.io/badge/platform-Linux-FF0000?logo=linux&logoColor=white" alt="Linux"></a>
   <a href="#licencia"><img src="https://img.shields.io/badge/license-MIT-FF0000" alt="MIT"></a>
   <a href="#uso"><img src="https://img.shields.io/badge/version-3.0-FF0000" alt="Versión 3.0"></a>
 </p>
@@ -18,8 +17,7 @@
 
 `info-wc` es un panel de sistema para terminal escrito en Bash. Muestra sistema, hardware, rendimiento y memoria en una interfaz roja, con barras animadas y un layout que se adapta al ancho de la terminal.
 
-- Código: <https://github.com/swbasmx/info-wc>
-- Repositorio APT: <https://swbasmx.github.io/info-wc>
+Repositorio: <https://github.com/swbasmx/info-wc>
 
 ## Características
 
@@ -29,9 +27,8 @@
 - **Sparkline de CPU** con las últimas 8 muestras.
 - **Datos útiles**: kernel, shell, uptime, CPU, GPU, LAN, IP pública, temperatura y batería.
 - **Caché de IP pública** con TTL de 15 minutos; `-r` fuerza la actualización.
-- **Paquete APT**: instala y desinstala con `apt`, resolviendo las dependencias.
-- **Autoarranque sin `~/.bashrc`**: usa `/etc/profile.d/info-wc.sh`, propiedad del paquete.
-- **Instalador con detección de distro**: comprueba `/etc/os-release` antes de tocar APT.
+- **Autoarranque opcional** al abrir una terminal, mediante un bloque marcado en `~/.bashrc`.
+- **Instalador idempotente**: no duplica el bloque si ya existe.
 - **Respeta tu terminal**: `NO_COLOR`, `TERM=dumb`, redirecciones y el flag `-q`.
 
 ## Capturas
@@ -53,52 +50,56 @@
 
 > Las IPs de las capturas son de ejemplo; no corresponden a la red del autor.
 
+## Requisitos
+
+- Linux.
+- Bash 4+.
+- Utilidades estándar: `awk`, `sed`, `df`, `ip` o `hostname`, y acceso a `/proc` y `/sys`.
+- Opcionales:
+  - `curl` para consultar la IP pública.
+  - `lspci` para el modelo de GPU.
+  - `nvidia-smi` o `gpu_busy_percent` para el uso de GPU.
+  - `/sys/class/power_supply` para la batería.
+  - `/sys/class/hwmon` o thermal zones para la temperatura.
+
 ## Instalación
-
-### Automática
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/swbasmx/info-wc/main/install.sh
-sudo bash install.sh
-```
-
-O desde el repositorio:
 
 ```bash
 git clone https://github.com/swbasmx/info-wc.git
 cd info-wc
-sudo ./install.sh
+./install.sh
 ```
 
 El instalador:
 
-- detecta Debian/Ubuntu leyendo `/etc/os-release`;
-- añade el repositorio APT `https://swbasmx.github.io/info-wc`;
-- instala `info-wc` y sus dependencias con `apt`;
-- deja el autoarranque en `/etc/profile.d/info-wc.sh`, sin tocar `~/.bashrc`.
+- copia `info-wc` a `~/.local/bin/info-wc`;
+- añade un bloque marcado a `~/.bashrc` para ejecutarlo al abrir una terminal interactiva;
+- no duplica el bloque si ya existe.
 
-### Manual con APT
+Abre una terminal nueva o recarga tu configuración:
 
 ```bash
-echo "deb [trusted=yes] https://swbasmx.github.io/info-wc stable main" \
-  | sudo tee /etc/apt/sources.list.d/info-wc.list
-
-sudo apt update
-sudo apt install info-wc
+source ~/.bashrc
 ```
 
-> El repositorio no está firmado; por eso usa `[trusted=yes]`. Si prefieres no confiar en un repo sin firma, compila el `.deb` con `./build-deb.sh` e instálalo con `sudo apt install ./dist/info-wc_3.0_all.deb`.
+### Sin autoarranque
 
-### Autoarranque
-
-El paquete instala `/etc/profile.d/info-wc.sh`, que ejecuta `info-wc` al abrir una **shell de login** interactiva. No modifica `~/.bashrc` ni archivos personales.
-
-Si abres una pestaña que no es una shell de login, ejecuta `info-wc` manualmente. No hay un mecanismo estándar para cada pestaña sin tocar el rc del shell.
-
-Para desactivarlo temporalmente:
+Si solo quieres el comando disponible:
 
 ```bash
-INFO_WC_SKIP=1 bash -l
+install -m 755 info-wc ~/.local/bin/info-wc
+```
+
+Asegúrate de que `~/.local/bin` esté en tu `PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+También puedes ejecutarlo directamente desde el repo:
+
+```bash
+./info-wc
 ```
 
 ## Uso
@@ -123,28 +124,11 @@ info-wc -h       # ayuda
 ## Desinstalación
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/swbasmx/info-wc/main/uninstall.sh
-sudo bash uninstall.sh
+cd info-wc
+./uninstall.sh
 ```
 
-O a mano:
-
-```bash
-sudo apt purge info-wc
-sudo rm -f /etc/apt/sources.list.d/info-wc.list
-sudo apt update
-```
-
-No hay ningún bloque en `~/.bashrc` que limpiar.
-
-## Requisitos
-
-- Debian o Ubuntu con `apt`.
-- El paquete declara e instala: `bash`, `coreutils`, `gawk | mawk`, `sed`, `iproute2`, `hostname`, `curl` y `pciutils`.
-- Opcionales:
-  - `nvidia-smi` o `gpu_busy_percent` para el uso de GPU.
-  - `/sys/class/power_supply` para la batería.
-  - `/sys/class/hwmon` o thermal zones para la temperatura.
+Elimina `~/.local/bin/info-wc` y el bloque marcado de `~/.bashrc`. No toca el resto del archivo. Si instalaste con `PREFIX` o `BASHRC` personalizados, usa los mismos valores al desinstalar.
 
 ## Cómo funciona
 
@@ -155,17 +139,6 @@ No hay ningún bloque en `~/.bashrc` que limpiar.
 - **Animación**: dibuja la regla superior y rellena las barras en 6 pasos; usa `\033[5A` para redibujar sin parpadeo.
 - **Color**: truecolor `255;0;0`, fallback a `196` en 256 colores y `91` en 16 colores. Se desactiva si no hay TTY, si `NO_COLOR` está definido o si `TERM=dumb`.
 - **Caché**: la IP pública se guarda en `${XDG_CACHE_HOME:-$HOME/.cache}/info-wc/public-ip` durante 15 minutos.
-
-## Desarrollo
-
-```bash
-./build-deb.sh
-sudo apt install ./dist/info-wc_3.0_all.deb
-
-./build-repo.sh
-```
-
-`build-deb.sh` genera el `.deb` en `dist/`. `build-repo.sh` regenera `docs/`, que es el repositorio APT publicado con GitHub Pages.
 
 ## Personalización
 
@@ -192,34 +165,6 @@ C_RED=$(fg 0 255 180)
 ```
 
 El fallback de 16 colores está pensado para rojo; ajústalo si cambias el color principal.
-
-## Estructura
-
-```text
-info-wc/
-├── info-wc
-├── install.sh
-├── uninstall.sh
-├── build-deb.sh
-├── build-repo.sh
-├── packaging/
-│   └── profile.d/
-│       └── info-wc.sh
-├── docs/
-│   ├── dists/
-│   ├── pool/
-│   └── index.html
-├── assets/
-│   ├── banner.png
-│   ├── preview-wide.png
-│   └── preview-narrow.png
-├── README.md
-└── LICENSE
-```
-
-## Contribuir
-
-Issues y PRs son bienvenidos. Si vas a tocar el layout, pruébalo al menos a 40 y 80 columnas.
 
 ## Licencia
 
