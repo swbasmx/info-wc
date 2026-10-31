@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="info-wc: system info en rojo neón" width="100%">
+  <img src="assets/banner-minimal.png" alt="info-wc: system info en rojo neón" width="100%">
 </p>
 
 <p align="center">
