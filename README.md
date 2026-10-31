@@ -39,10 +39,6 @@ Repositorio: <https://github.com/swbasmx/info-wc>
   <img src="assets/demo.gif" alt="Animación de info-wc" width="100%">
 </p>
 
-<p align="center">
-  <img src="assets/preview-wide.png" alt="info-wc en una terminal de 80 columnas" width="100%">
-</p>
-
 <details>
 <summary><strong>Vista en 40 columnas</strong></summary>
 
