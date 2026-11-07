@@ -89,7 +89,8 @@ pass 'opciones'
 
 if command -v script >/dev/null 2>&1; then
   if command -v timeout >/dev/null 2>&1; then TO=(timeout 15); else TO=(); fi
-  "${TO[@]}" script -qec "$BIN -m -n -l es -i 0.1 --frames 3" /dev/null > "$TMP/monitor" 2>/dev/null || fail 'monitor --frames'
+  mon_cmd=$(printf 'TERM=xterm-256color %q -m -n -l es -i 0.1 --frames 3' "$BIN")
+  "${TO[@]}" script -qec "$mon_cmd" /dev/null > "$TMP/monitor" 2>/dev/null || fail 'monitor --frames'
   grep -q $'\033\[?1049h' "$TMP/monitor" || fail 'monitor no entró en pantalla alternativa'
   grep -q $'\033\[?1049l' "$TMP/monitor" || fail 'monitor no salió de pantalla alternativa'
   grep -q $'\033\[?25l' "$TMP/monitor" || fail 'monitor no ocultó el cursor'
@@ -100,7 +101,8 @@ if command -v script >/dev/null 2>&1; then
   (( frames == 3 )) || fail "monitor frames=$frames"
   pass 'monitor'
 
-  "${TO[@]}" script -qec "stty rows 10 cols 30; $BIN -m -n -l es -i 0.1 --frames 2" /dev/null > "$TMP/monitor-small" 2>/dev/null || fail 'monitor terminal pequeña'
+  small_cmd=$(printf 'stty rows 10 cols 30; TERM=xterm-256color %q -m -n -l es -i 0.1 --frames 2' "$BIN")
+  "${TO[@]}" script -qec "$small_cmd" /dev/null > "$TMP/monitor-small" 2>/dev/null || fail 'monitor terminal pequeña'
   grep -q 'terminal demasiado pequeña' "$TMP/monitor-small" || fail 'monitor no avisó de terminal pequeña'
   pass 'monitor terminal pequeña'
 else
