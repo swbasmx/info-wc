@@ -18,6 +18,17 @@
   <text x="102" y="222" fill="#ff5a5a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" letter-spacing="5">SYSTEM INFO PARA TERMINAL</text>
   <text x="102" y="258" fill="#9a9aa2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" letter-spacing="4">BASH · LINUX · SIN DEPENDENCIAS</text>
   <rect x="98" y="284" width="620" height="1" fill="#ff0000" fill-opacity="0.55"/>
-  <text x="100" y="316" fill="#ff0000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">❯ kurenai</text>
-  <text x="1180" y="316" fill="#ff0000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" text-anchor="end" letter-spacing="2">▰▰▰▰▰▰▱▱▱▱</text>
+  <text x="100" y="316" fill="#ff0000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">&gt; kurenai</text>
+  <g transform="translate(1060,300)">
+    <rect x="0" y="0" width="10" height="18" fill="#ff0000"/>
+    <rect x="12" y="0" width="10" height="18" fill="#ff0000"/>
+    <rect x="24" y="0" width="10" height="18" fill="#ff0000"/>
+    <rect x="36" y="0" width="10" height="18" fill="#ff0000"/>
+    <rect x="48" y="0" width="10" height="18" fill="#ff0000"/>
+    <rect x="60" y="0" width="10" height="18" fill="#ff0000"/>
+    <rect x="72" y="0" width="10" height="18" fill="none" stroke="#ff0000" stroke-opacity="0.55"/>
+    <rect x="84" y="0" width="10" height="18" fill="none" stroke="#ff0000" stroke-opacity="0.55"/>
+    <rect x="96" y="0" width="10" height="18" fill="none" stroke="#ff0000" stroke-opacity="0.55"/>
+    <rect x="108" y="0" width="10" height="18" fill="none" stroke="#ff0000" stroke-opacity="0.55"/>
+  </g>
 </svg>
