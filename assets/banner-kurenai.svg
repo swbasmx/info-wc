@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="kurenai: system info para terminal">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ff0000" stroke-opacity="0.10" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="glow" cx="18%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#ff0000" stop-opacity="0.16"/>
+      <stop offset="0.55" stop-color="#ff0000" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="360" fill="#050506"/>
+  <rect width="1280" height="360" fill="url(#grid)"/>
+  <rect width="1280" height="360" fill="url(#glow)"/>
+  <rect x="64" y="58" width="3" height="244" fill="#ff0000"/>
+  <text x="1180" y="42" fill="#5a5a5f" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" text-anchor="end" letter-spacing="2">v3.2</text>
+  <text x="98" y="172" fill="#ff0000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="94" font-weight="700" letter-spacing="1">kurenai</text>
+  <text x="102" y="222" fill="#ff5a5a" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" letter-spacing="5">SYSTEM INFO PARA TERMINAL</text>
+  <text x="102" y="258" fill="#9a9aa2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" letter-spacing="4">BASH · LINUX · SIN DEPENDENCIAS</text>
+  <rect x="98" y="284" width="620" height="1" fill="#ff0000" fill-opacity="0.55"/>
+  <text x="100" y="316" fill="#ff0000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">❯ kurenai</text>
+  <text x="1180" y="316" fill="#ff0000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" text-anchor="end" letter-spacing="2">▰▰▰▰▰▰▱▱▱▱</text>
+</svg>

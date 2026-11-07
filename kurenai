@@ -1,0 +1,1525 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION=3.2
+CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/kurenai
+CACHE_FILE=$CACHE_DIR/public-ip
+TTL=900
+TTL_NEG=60
+
+BAR_W=10
+if [[ ${KURENAI_BAR_W:-} =~ ^[0-9]+$ ]]; then BAR_W=$((10#$KURENAI_BAR_W)); fi
+if (( BAR_W < 4 )); then BAR_W=4; fi
+if (( BAR_W > 14 )); then BAR_W=14; fi
+
+accent=${KURENAI_ACCENT:-255 0 0}
+accent=${accent//,/ }
+read -r accent_r accent_g accent_b <<< "$accent" || true
+for _c in "$accent_r" "$accent_g" "$accent_b"; do
+  [[ $_c =~ ^[0-9]{1,3}$ ]] || { accent_r=255; accent_g=0; accent_b=0; break; }
+done
+accent_r=$((10#$accent_r))
+accent_g=$((10#$accent_g))
+accent_b=$((10#$accent_b))
+if (( accent_r > 255 || accent_g > 255 || accent_b > 255 )); then
+  accent_r=255; accent_g=0; accent_b=0
+fi
+
+refresh=0
+net=1
+if [[ ${KURENAI_NO_NET:-0} != 0 ]]; then net=0; fi
+anim=1
+if [[ ${KURENAI_NO_ANIM:-0} != 0 ]]; then anim=0; fi
+anim_time=0.3
+
+monitor=0
+interval_ms=1000
+max_frames=0
+paused=0
+resized=0
+frames=0
+tick=0
+show_footer=1
+monitor_active=0
+gpu_poll_pid=''
+gpu_poll_file=''
+gpu_poll_new=''
+ip_pending=0
+stty_saved=''
+prev_cpu_total=''
+prev_cpu_idle=''
+hist=(0 0 0 0 0 0 0 0)
+term_cols=80
+term_lines=24
+
+ival_env=${KURENAI_INTERVAL:-}
+ival_env=${ival_env/,/.}
+if [[ $ival_env == .* ]]; then ival_env=0$ival_env; fi
+if [[ $ival_env =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  interval_ms=$(LC_ALL=C awk -v s="$ival_env" 'BEGIN{printf "%d", s*1000}')
+  if (( interval_ms < 250 )); then interval_ms=250; fi
+  if (( interval_ms > 10000 )); then interval_ms=10000; fi
+fi
+
+detect_lang() {
+  local l=${LC_ALL:-${LC_MESSAGES:-${LANGUAGE:-${LANG:-}}}}
+  l=${l%%:*}
+  l=${l%%.*}
+  case ${l,,} in
+    es*) printf 'es' ;;
+    en*) printf 'en' ;;
+    *) printf 'en' ;;
+  esac
+}
+
+lang=${KURENAI_LANG:-$(detect_lang)}
+lang=${lang%%[:._@-]*}
+case ${lang,,} in
+  es) lang=es ;;
+  en) lang=en ;;
+  *) lang=en ;;
+esac
+
+t() {
+  case "$lang:$1" in
+    es:system) printf 'SISTEMA' ;;
+    en:system) printf 'SYSTEM' ;;
+    es:hardware) printf 'HARDWARE' ;;
+    en:hardware) printf 'HARDWARE' ;;
+    es:performance) printf 'RENDIMIENTO' ;;
+    en:performance) printf 'PERFORMANCE' ;;
+    es:memory) printf 'MEMORIA' ;;
+    en:memory) printf 'MEMORY' ;;
+    es:uptime) printf 'Activo' ;;
+    en:uptime) printf 'Uptime' ;;
+    es:cores) printf 'Núcleos' ;;
+    en:cores) printf 'Cores' ;;
+    es:public) printf 'Pública' ;;
+    en:public) printf 'Public' ;;
+    es:load) printf 'Carga' ;;
+    en:load) printf 'Load' ;;
+    es:disk) printf 'Disco' ;;
+    en:disk) printf 'Disk' ;;
+    es:offline) printf 'sin conexión' ;;
+    en:offline) printf 'offline' ;;
+    es:disabled_net) printf 'desactivada (-n)' ;;
+    en:disabled_net) printf 'disabled (-n)' ;;
+    es:na) printf 'n/d' ;;
+    en:na) printf 'n/a' ;;
+    es:no_swap) printf 'sin swap' ;;
+    en:no_swap) printf 'no swap' ;;
+    es:unknown) printf 'desconocido' ;;
+    en:unknown) printf 'unknown' ;;
+    es:checking) printf 'consultando…' ;;
+    en:checking) printf 'checking…' ;;
+    es:monitor_paused) printf 'PAUSA' ;;
+    en:monitor_paused) printf 'PAUSED' ;;
+    es:monitor_small) printf 'terminal demasiado pequeña' ;;
+    en:monitor_small) printf 'terminal too small' ;;
+    es:monitor_quit) printf 'salir' ;;
+    en:monitor_quit) printf 'quit' ;;
+    es:monitor_pause) printf 'pausa' ;;
+    en:monitor_pause) printf 'pause' ;;
+    es:monitor_refresh) printf 'refrescar' ;;
+    en:monitor_refresh) printf 'refresh' ;;
+    es:monitor_help) printf 'ayuda' ;;
+    en:monitor_help) printf 'help' ;;
+    es:monitor_tty) printf 'el modo monitor necesita una terminal interactiva' ;;
+    en:monitor_tty) printf 'monitor mode requires an interactive terminal' ;;
+    es:invalid_interval) printf 'intervalo inválido' ;;
+    en:invalid_interval) printf 'invalid interval' ;;
+    es:invalid_frames) printf 'número de frames inválido' ;;
+    en:invalid_frames) printf 'invalid frame count' ;;
+    es:full) printf 'llena' ;;
+    en:full) printf 'full' ;;
+    es:charging) printf 'cargando' ;;
+    en:charging) printf 'charging' ;;
+    es:discharging) printf 'descarga' ;;
+    en:discharging) printf 'discharging' ;;
+    es:missing_value) printf 'falta el valor de' ;;
+    en:missing_value) printf 'missing value for' ;;
+    es:invalid_time) printf 'tiempo inválido' ;;
+    en:invalid_time) printf 'invalid time' ;;
+    es:unsupported_lang) printf 'idioma no soportado (usa es o en)' ;;
+    en:unsupported_lang) printf 'unsupported language (use es or en)' ;;
+    es:unknown_option) printf 'opción desconocida' ;;
+    en:unknown_option) printf 'unknown option' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+update_wait() {
+  printf -v wait_s '%d.%03d' $(( interval_ms / 1000 )) $(( interval_ms % 1000 ))
+  printf -v interval_s '%d.%02d' $(( interval_ms / 1000 )) $((( interval_ms % 1000 ) / 10 ))
+}
+
+init_labels() {
+  L_SYSTEM=$(t system)
+  L_HARDWARE=$(t hardware)
+  L_PERFORMANCE=$(t performance)
+  L_MEMORY=$(t memory)
+  L_UPTIME=$(t uptime)
+  L_CORES=$(t cores)
+  L_PUBLIC=$(t public)
+  L_LOAD=$(t load)
+  L_DISK=$(t disk)
+  L_NA=$(t na)
+  L_NO_SWAP=$(t no_swap)
+  L_UNKNOWN=$(t unknown)
+  L_OFFLINE=$(t offline)
+  L_DISABLED_NET=$(t disabled_net)
+  L_CHECKING=$(t checking)
+  L_PAUSED=$(t monitor_paused)
+  L_SMALL=$(t monitor_small)
+  L_FULL=$(t full)
+  L_CHARGING=$(t charging)
+  L_DISCHARGING=$(t discharging)
+  L_FOOT_Q=$(t monitor_quit)
+  L_FOOT_P=$(t monitor_pause)
+  L_FOOT_R=$(t monitor_refresh)
+  L_FOOT_H=$(t monitor_help)
+  update_wait
+}
+
+usage() {
+  if [[ $lang == es ]]; then
+    cat <<'EOF'
+kurenai - resumen del sistema estilo neofetch, en rojo neón
+
+uso: kurenai [opciones]
+
+  -r, --refresh   ignora la caché y vuelve a consultar la IP pública
+  -n, --no-net    no consulta la IP pública
+  -q, --no-anim   sin animación (salida estática)
+  -t, --time S    duración de la animación en segundos (0 la desactiva)
+  -m, --monitor   modo en vivo (requiere terminal interactiva)
+  -i, --interval S intervalo de refresco en segundos (0.25..10; implica -m)
+      --frames N  renderiza N frames y sale (pruebas)
+  -l, --lang L    idioma: es o en (por defecto, según LANG)
+  -V, --version   muestra la versión
+  -h, --help      muestra esta ayuda
+
+variables: KURENAI_LANG, KURENAI_NO_NET=1, KURENAI_NO_ANIM=1,
+           KURENAI_ACCENT="R G B", KURENAI_BAR_W=4..14, KURENAI_WIDTH=40..84,
+           KURENAI_INTERVAL=1
+EOF
+  else
+    cat <<'EOF'
+kurenai - neofetch-style system summary in neon red
+
+usage: kurenai [options]
+
+  -r, --refresh   ignore the cache and refresh the public IP
+  -n, --no-net    do not query the public IP
+  -q, --no-anim   disable the animation (static output)
+  -t, --time S    animation duration in seconds (0 disables it)
+  -m, --monitor   live mode (requires an interactive terminal)
+  -i, --interval S refresh interval in seconds (0.25..10; implies -m)
+      --frames N  render N frames and exit (testing)
+  -l, --lang L    language: es or en (default: from LANG)
+  -V, --version   show version
+  -h, --help      show this help
+
+environment: KURENAI_LANG, KURENAI_NO_NET=1, KURENAI_NO_ANIM=1,
+             KURENAI_ACCENT="R G B", KURENAI_BAR_W=4..14, KURENAI_WIDTH=40..84,
+             KURENAI_INTERVAL=1
+EOF
+  fi
+}
+
+while (( $# )); do
+  case $1 in
+    -r|--refresh) refresh=1; shift ;;
+    -n|--no-net)  net=0; shift ;;
+    -q|--no-anim) anim=0; shift ;;
+    -m|--monitor) monitor=1; shift ;;
+    -i|--interval)
+      [[ $# -ge 2 ]] || { printf 'kurenai: %s %s\n' "$(t missing_value)" "$1" >&2; exit 2; }
+      ival=${2/,/.}
+      if [[ $ival == .* ]]; then ival=0$ival; fi
+      [[ $ival =~ ^[0-9]+([.][0-9]+)?$ ]] || { printf 'kurenai: %s: %s\n' "$(t invalid_interval)" "$2" >&2; exit 2; }
+      interval_ms=$(LC_ALL=C awk -v s="$ival" 'BEGIN{printf "%d", s*1000}')
+      if (( interval_ms < 250 )); then interval_ms=250; fi
+      if (( interval_ms > 10000 )); then interval_ms=10000; fi
+      monitor=1
+      shift 2 ;;
+    --frames)
+      [[ $# -ge 2 ]] || { printf 'kurenai: %s %s\n' "$(t missing_value)" "$1" >&2; exit 2; }
+      [[ $2 =~ ^[0-9]+$ ]] || { printf 'kurenai: %s: %s\n' "$(t invalid_frames)" "$2" >&2; exit 2; }
+      max_frames=$((10#$2))
+      monitor=1
+      shift 2 ;;
+    -l|--lang)
+      [[ $# -ge 2 ]] || { printf 'kurenai: %s %s\n' "$(t missing_value)" "$1" >&2; exit 2; }
+      case ${2,,} in
+        es*) lang=es ;;
+        en*) lang=en ;;
+        *) printf 'kurenai: %s: %s\n' "$(t unsupported_lang)" "$2" >&2; exit 2 ;;
+      esac
+      shift 2 ;;
+    -t|--time)
+      [[ $# -ge 2 ]] || { printf 'kurenai: %s %s\n' "$(t missing_value)" "$1" >&2; exit 2; }
+      anim_time=${2/,/.}
+      if [[ $anim_time == .* ]]; then anim_time=0$anim_time; fi
+      [[ $anim_time =~ ^[0-9]+([.][0-9]+)?$ ]] || { printf 'kurenai: %s: %s\n' "$(t invalid_time)" "$2" >&2; exit 2; }
+      if [[ $anim_time =~ ^0+([.]0+)?$ ]]; then anim=0; else anim=1; fi
+      shift 2 ;;
+    --) shift; break ;;
+    -V|--version) printf 'kurenai %s\n' "$VERSION"; exit 0 ;;
+    -h|--help)    usage; exit 0 ;;
+    *) printf 'kurenai: %s: %s\n' "$(t unknown_option)" "$1" >&2; exit 2 ;;
+  esac
+done
+if (( $# )); then
+  printf 'kurenai: %s: %s\n' "$(t unknown_option)" "$1" >&2
+  exit 2
+fi
+
+init_labels
+
+is_tty=0
+if [[ -t 1 ]]; then is_tty=1; fi
+
+color_mode=0
+if (( is_tty )) && [[ -z ${NO_COLOR:-} && ${TERM:-} != dumb ]]; then
+  if [[ ${COLORTERM:-} == *truecolor* || ${COLORTERM:-} == *24bit* ]]; then
+    color_mode=3
+  elif [[ ${TERM:-} == *256color* ]]; then
+    color_mode=2
+  else
+    color_mode=1
+  fi
+fi
+
+if (( ! is_tty || ! color_mode )); then anim=0; fi
+
+anim_rule_delay=0
+anim_bar_delay=0
+if (( anim )); then
+  anim_rule_delay=$(LC_ALL=C awk -v t="$anim_time" 'BEGIN{printf "%.6f", t * 0.25 / 11}')
+  anim_bar_delay=$(LC_ALL=C awk -v t="$anim_time" 'BEGIN{printf "%.6f", t * 0.75 / 6}')
+fi
+
+fg() {
+  local r=$1 g=$2 b=$3
+  case $color_mode in
+    3) printf '\033[38;2;%d;%d;%dm' "$r" "$g" "$b" ;;
+    2)
+      local rr=$(( (r * 5 + 127) / 255 ))
+      local gg=$(( (g * 5 + 127) / 255 ))
+      local bb=$(( (b * 5 + 127) / 255 ))
+      printf '\033[38;5;%dm' $(( 16 + 36 * rr + 6 * gg + bb ))
+      ;;
+    1)
+      local max=$r base mask=0
+      if (( g > max )); then max=$g; fi
+      if (( b > max )); then max=$b; fi
+      if (( max < 32 )); then printf '\033[2;30m'; return 0; fi
+      if (( r >= 96 )); then mask=$(( mask | 1 )); fi
+      if (( g >= 96 )); then mask=$(( mask | 2 )); fi
+      if (( b >= 96 )); then mask=$(( mask | 4 )); fi
+      if (( mask == 0 )); then printf '\033[2;37m'; return 0; fi
+      case $mask in
+        1) base=31 ;;
+        2) base=32 ;;
+        4) base=34 ;;
+        3) base=33 ;;
+        5) base=35 ;;
+        6) base=36 ;;
+        7) base=37 ;;
+        *) base=37 ;;
+      esac
+      if (( max < 96 )); then printf '\033[2;%dm' "$base"
+      elif (( max < 160 )); then printf '\033[%dm' "$base"
+      else printf '\033[%dm' $(( base + 60 )); fi
+      ;;
+    *) printf '' ;;
+  esac
+}
+
+if (( color_mode )); then
+  RST=$'\033[0m'
+  BLD=$'\033[1m'
+else
+  RST=''
+  BLD=''
+fi
+
+C_RED=$(fg "$accent_r" "$accent_g" "$accent_b")
+
+tmp_cache=''
+tmp_ip=''
+tmp_gpu=''
+ip_pid=''
+gpu_pid=''
+cur_hidden=0
+
+show_cursor() {
+  if (( cur_hidden )); then
+    printf '\033[?25h'
+    cur_hidden=0
+  fi
+  return 0
+}
+
+hide_cursor() {
+  if (( is_tty && ! cur_hidden )); then
+    printf '\033[?25l'
+    cur_hidden=1
+  fi
+  return 0
+}
+
+stop_gpu_poller() {
+  if [[ -n $gpu_poll_pid ]]; then
+    kill "$gpu_poll_pid" 2>/dev/null || true
+    wait "$gpu_poll_pid" 2>/dev/null || true
+    gpu_poll_pid=''
+  fi
+  if [[ -n $gpu_poll_file ]]; then rm -f -- "$gpu_poll_file"; gpu_poll_file=''; fi
+  if [[ -n $gpu_poll_new ]]; then rm -f -- "$gpu_poll_new"; gpu_poll_new=''; fi
+  return 0
+}
+
+monitor_leave() {
+  if (( monitor_active )); then
+    show_cursor
+    printf '\033[?1049l'
+    if [[ -n $stty_saved ]]; then
+      stty "$stty_saved" 2>/dev/null || true
+      stty_saved=''
+    fi
+    monitor_active=0
+  fi
+  return 0
+}
+
+monitor_enter() {
+  monitor_active=1
+  stty_saved=$(stty -g 2>/dev/null || true)
+  if [[ -n $stty_saved ]]; then stty -echo 2>/dev/null || true; fi
+  printf '\033[?1049h'
+  hide_cursor
+  return 0
+}
+
+cleanup() {
+  stop_gpu_poller
+  if [[ -n $ip_pid ]]; then kill "$ip_pid" 2>/dev/null || true; ip_pid=''; fi
+  if [[ -n $gpu_pid ]]; then kill "$gpu_pid" 2>/dev/null || true; gpu_pid=''; fi
+  if [[ -n $tmp_cache ]]; then rm -f -- "$tmp_cache"; tmp_cache=''; fi
+  if [[ -n $tmp_ip ]]; then rm -f -- "$tmp_ip"; tmp_ip=''; fi
+  if [[ -n $tmp_gpu ]]; then rm -f -- "$tmp_gpu"; tmp_gpu=''; fi
+  monitor_leave
+  show_cursor
+  return 0
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+trap 'resized=1' WINCH
+
+update_size() {
+  term_cols=''
+  term_lines=''
+  if (( is_tty )); then
+    term_cols=$(tput cols 2>/dev/null || true)
+    term_lines=$(tput lines 2>/dev/null || true)
+  fi
+  if [[ ! $term_cols =~ ^[0-9]+$ ]]; then term_cols=${COLUMNS:-80}; fi
+  if [[ ! $term_lines =~ ^[0-9]+$ ]]; then term_lines=${LINES:-24}; fi
+  term_cols=$((10#$term_cols))
+  term_lines=$((10#$term_lines))
+  cols=$term_cols
+  if [[ ${KURENAI_WIDTH:-} =~ ^[0-9]+$ ]]; then cols=$((10#$KURENAI_WIDTH)); fi
+  if (( monitor && cols > term_cols )); then cols=$term_cols; fi
+  if (( cols > 84 )); then cols=84; fi
+  if (( cols < 40 )); then cols=40; fi
+  wide=0
+  if (( cols >= 78 )); then wide=1; fi
+  LEFT_W=34
+  GAP=3
+  RIGHT_W=$(( cols - LEFT_W - GAP - 2 ))
+  if (( RIGHT_W < 20 )); then wide=0; fi
+  if (( anim && is_tty && term_lines < 7 )); then anim=0; fi
+  return 0
+}
+update_size
+
+human_var() {
+  local b=${1:-0} i=0 div=1 whole frac
+  local units=(B K M G T)
+  while (( b / div >= 1024 && i < 4 )); do
+    div=$(( div * 1024 ))
+    i=$(( i + 1 ))
+  done
+  whole=$(( b / div ))
+  frac=$(( (b % div) * 10 / div ))
+  printf -v "$2" '%d.%d%s' "$whole" "$frac" "${units[i]}"
+}
+
+shorten() {
+  local s=${1:-} max=${2:-48}
+  if (( max < 1 )); then printf ''; return 0; fi
+  if (( ${#s} > max )); then
+    s=${s:0:max-1}…
+  fi
+  printf '%s' "$s"
+}
+
+shorten_var() {
+  local s=${1:-} max=${2:-48}
+  if (( max < 1 )); then SHORT_OUT=''; return 0; fi
+  if (( ${#s} > max )); then s=${s:0:max-1}…; fi
+  SHORT_OUT=$s
+  return 0
+}
+
+fit_detail_var() {
+  local s=${1:-} max=${2:-48} base l r
+  if (( max < 1 )); then FIT_OUT=''; return 0; fi
+  if (( ${#s} <= max )); then FIT_OUT=$s; return 0; fi
+  if [[ $s == *' · '* ]]; then
+    base=${s%% · *}
+    if (( ${#base} <= max )); then FIT_OUT=$base; return 0; fi
+  fi
+  if [[ $s == */* ]]; then
+    l=${s%%/*}
+    r=${s#*/}
+    if [[ $l == *.* ]]; then l="${l%%.*}${l##*[0-9]}"; fi
+    if [[ $r == *.* ]]; then r="${r%%.*}${r##*[0-9]}"; fi
+    base="$l/$r"
+    if (( ${#base} <= max )); then FIT_OUT=$base; return 0; fi
+    base=${s%%/*}
+    if (( ${#base} <= max )); then FIT_OUT=$base; return 0; fi
+  fi
+  shorten_var "$s" "$max"
+  FIT_OUT=$SHORT_OUT
+  return 0
+}
+
+cpu_short() {
+  local s=$1
+  s=${s//(R)/}
+  s=${s//(TM)/}
+  s=${s//(r)/}
+  s=${s//(tm)/}
+  s=$(printf '%s' "$s" | sed -E \
+    -e 's/[[:space:]]+@[[:space:]]*[0-9.]+[[:space:]]*GHz//Ig' \
+    -e 's/[[:space:]]+(with|w\/)[[:space:]]+Radeon.*$//Ig' \
+    -e 's/[[:space:]]+Radeon.*$//Ig' \
+    -e 's/[[:space:]]+[A-Za-z0-9]+-Core.*$//Ig' \
+    -e 's/[[:space:]]+[0-9]+[[:space:]]+Compute Cores.*$//Ig' \
+    -e 's/[[:space:]]+[0-9]+C\+[0-9]+G.*$//Ig' \
+    -e 's/[[:space:]]+(CPU|Processor)[[:space:]]*$//Ig' \
+    -e 's/^[0-9]+(st|nd|rd|th)[[:space:]]+Gen[[:space:]]+//Ig' \
+    -e 's/[[:space:]]+/ /g' \
+    -e 's/^[[:space:]]+//' \
+    -e 's/[[:space:]]+$//')
+  shorten "$s" 44
+}
+
+gpu_short() {
+  local s=$1 vendor=''
+  case $s in
+    *NVIDIA*) vendor=NVIDIA ;;
+    *AMD*|*ATI*|*Advanced\ Micro\ Devices*|*Radeon*) vendor=AMD ;;
+    *Intel*) vendor=Intel ;;
+  esac
+  s=$(printf '%s' "$s" | sed -E \
+    -e 's/Advanced Micro Devices, Inc\. \[AMD\/ATI\]/AMD/g' \
+    -e 's/\[AMD\/ATI\]//g' \
+    -e 's/NVIDIA Corporation/NVIDIA/g' \
+    -e 's/Intel Corporation/Intel/g' \
+    -e 's/\(rev [0-9a-fA-F]+\)//g' \
+    -e 's/.*\[([^]]*)\].*/\1/' \
+    -e 's/[[:space:]]+Graphics[[:space:]]*$//Ig' \
+    -e 's/[[:space:]]+/ /g' \
+    -e 's/^[[:space:]]+//' \
+    -e 's/[[:space:]]+$//')
+  if [[ -n $vendor && $s != "$vendor"* ]]; then
+    s="$vendor $s"
+  fi
+  shorten "$s" 52
+}
+
+lan_info() {
+  local out=''
+  if command -v ip >/dev/null 2>&1; then
+    out=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src")s=$(i+1); if($i=="dev")d=$(i+1)}} END{if(s)print d, s}' || true)
+    if [[ -z $out ]]; then
+      out=$(ip -4 -o addr show scope global 2>/dev/null | awk 'NR==1{print $2, $4}' || true)
+      out=${out%%/*}
+    fi
+  fi
+  if [[ -z $out ]]; then
+    out=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  printf '%s' "${out:-$L_OFFLINE}"
+}
+
+valid_ip() {
+  local ip=$1 n
+  local -a o
+  if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    local IFS=.
+    read -r -a o <<< "$ip"
+    for n in "${o[@]}"; do
+      (( n <= 255 )) || return 1
+    done
+    return 0
+  fi
+  if [[ $ip == *:* && $ip =~ ^[0-9a-fA-F:]+$ && $ip != *:::* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+write_cache() {
+  local ts=$1 val=$2
+  mkdir -p "$CACHE_DIR" 2>/dev/null || return 0
+  tmp_cache=$CACHE_FILE.tmp.$$
+  if printf '%s %s\n' "$ts" "$val" > "$tmp_cache" 2>/dev/null; then
+    mv -f -- "$tmp_cache" "$CACHE_FILE" 2>/dev/null || rm -f -- "$tmp_cache"
+    tmp_cache=''
+    chmod 600 "$CACHE_FILE" 2>/dev/null || true
+  fi
+  return 0
+}
+
+cache_ip() {
+  local ts cached now
+  [[ -s $CACHE_FILE ]] || return 1
+  read -r ts cached < "$CACHE_FILE" || return 1
+  [[ $ts =~ ^[0-9]+$ ]] || return 1
+  if [[ $cached == '-' ]]; then
+    return 1
+  fi
+  valid_ip "$cached" || return 1
+  now=$(date +%s)
+  if (( now - ts < TTL )); then
+    printf '%s' "$cached"
+    return 0
+  fi
+  return 1
+}
+
+public_ip() {
+  local force=${1:-0} ip='' ts='' cached='' now
+  now=$(date +%s)
+  if (( force == 0 )) && [[ -s $CACHE_FILE ]]; then
+    read -r ts cached < "$CACHE_FILE" || true
+    if [[ $ts =~ ^[0-9]+$ ]]; then
+      if [[ $cached == '-' ]]; then
+        if (( now - ts < TTL_NEG )); then return 0; fi
+      elif valid_ip "$cached" && (( now - ts < TTL )); then
+        printf '%s' "$cached"
+        return 0
+      fi
+    fi
+  fi
+  ip=$(curl -fsS --connect-timeout 0.5 --max-time 1 --proto '=https' https://api.ipify.org 2>/dev/null || true)
+  if [[ -z $ip ]]; then
+    ip=$(curl -fsS --connect-timeout 0.5 --max-time 1 --proto '=https' https://ifconfig.me/ip 2>/dev/null || true)
+  fi
+  ip=${ip//[$'\r\n ']/}
+  if valid_ip "$ip"; then
+    write_cache "$now" "$ip"
+    printf '%s' "$ip"
+  elif (( force == 0 )); then
+    write_cache "$now" '-'
+  fi
+}
+
+start_ip_fetch() {
+  local force=${1:-$refresh}
+  if (( ! net )); then pub=$L_DISABLED_NET; return 0; fi
+  if (( ip_pending )); then return 0; fi
+  tmp_ip=$(mktemp 2>/dev/null || true)
+  if [[ -z $tmp_ip ]]; then
+    pub=$(public_ip "$force")
+    if [[ -z $pub ]]; then pub=$L_OFFLINE; fi
+    return 0
+  fi
+  (
+    trap - EXIT
+    public_ip "$force" > "$tmp_ip"
+  ) & ip_pid=$!
+  ip_pending=1
+  return 0
+}
+
+finish_ip_fetch() {
+  if (( ip_pending )); then
+    if [[ -n $ip_pid ]]; then
+      wait "$ip_pid" 2>/dev/null || true
+      ip_pid=''
+    fi
+    if [[ -n $tmp_ip ]]; then
+      if [[ -s $tmp_ip ]]; then pub=$(<"$tmp_ip"); fi
+      rm -f -- "$tmp_ip"
+      tmp_ip=''
+    fi
+    ip_pending=0
+  fi
+  if (( ! net )); then
+    pub=$L_DISABLED_NET
+  elif [[ -z $pub ]]; then
+    pub=$L_OFFLINE
+  fi
+  return 0
+}
+
+poll_ip_fetch() {
+  if (( ip_pending )); then
+    if ! kill -0 "$ip_pid" 2>/dev/null; then
+      finish_ip_fetch
+    fi
+  fi
+  return 0
+}
+
+init_ip_monitor() {
+  pub=''
+  ip_pending=0
+  if (( ! net )); then
+    pub=$L_DISABLED_NET
+    return 0
+  fi
+  if (( refresh )); then
+    start_ip_fetch 1
+    if (( ip_pending )); then pub=$L_CHECKING; fi
+    return 0
+  fi
+  pub=$(cache_ip || true)
+  if [[ -z $pub ]]; then
+    start_ip_fetch 0
+    if (( ip_pending )); then pub=$L_CHECKING; fi
+  fi
+  return 0
+}
+
+collect_cpu() {
+  local u n s i w irq sirq st rest pt pi ct ci dt di st_t st_i idx
+  read -r _ u n s i w irq sirq st rest < /proc/stat || return 0
+  st_t=$(( u + n + s + i + w + irq + sirq + st ))
+  st_i=$(( i + w ))
+  pt=$st_t
+  pi=$st_i
+  for (( idx=0; idx<8; idx++ )); do
+    sleep 0.015
+    if ! read -r _ u n s i w irq sirq st rest < /proc/stat; then
+      ct=$pt
+      ci=$pi
+    else
+      ct=$(( u + n + s + i + w + irq + sirq + st ))
+      ci=$(( i + w ))
+    fi
+    dt=$(( ct - pt ))
+    di=$(( ci - pi ))
+    if (( dt > 0 )); then
+      hist[idx]=$(( (dt - di) * 100 / dt ))
+    else
+      hist[idx]=0
+    fi
+    pt=$ct
+    pi=$ci
+  done
+  dt=$(( pt - st_t ))
+  di=$(( pi - st_i ))
+  if (( dt > 0 )); then
+    cpu_pct=$(( (dt - di) * 100 / dt ))
+  else
+    cpu_pct=0
+  fi
+  return 0
+}
+
+cpu_snapshot() {
+  local u n s i w irq sirq st rest
+  if ! read -r _ u n s i w irq sirq st rest < /proc/stat; then
+    prev_cpu_total=''
+    prev_cpu_idle=''
+    return 0
+  fi
+  prev_cpu_total=$(( u + n + s + i + w + irq + sirq + st ))
+  prev_cpu_idle=$(( i + w ))
+  return 0
+}
+
+collect_cpu_tick() {
+  local u n s i w irq sirq st rest total idle dt di
+  if ! read -r _ u n s i w irq sirq st rest < /proc/stat; then
+    return 0
+  fi
+  total=$(( u + n + s + i + w + irq + sirq + st ))
+  idle=$(( i + w ))
+  if [[ -n $prev_cpu_total ]]; then
+    dt=$(( total - prev_cpu_total ))
+    di=$(( idle - prev_cpu_idle ))
+    if (( dt > 0 )); then
+      cpu_pct=$(( (dt - di) * 100 / dt ))
+    else
+      cpu_pct=0
+    fi
+    hist=("${hist[@]:1}" "$cpu_pct")
+  else
+    cpu_pct=0
+  fi
+  prev_cpu_total=$total
+  prev_cpu_idle=$idle
+  return 0
+}
+
+gpu_usage_var() {
+  local hint=${1:-} p='' f
+  if [[ $hint != *AMD* && $hint != *Intel* ]] && command -v nvidia-smi >/dev/null 2>&1; then
+    p=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ' || true)
+  fi
+  if [[ ! $p =~ ^[0-9]+$ ]]; then
+    for f in /sys/class/drm/card*/device/gpu_busy_percent; do
+      [[ -r $f ]] || continue
+      p=$(<"$f")
+      if [[ $p =~ ^[0-9]+$ ]]; then break; fi
+    done
+  fi
+  if [[ $p =~ ^[0-9]+$ ]]; then
+    GPU_USAGE_OUT=$p
+    return 0
+  fi
+  GPU_USAGE_OUT=''
+  return 1
+}
+
+gpu_usage() {
+  if gpu_usage_var "$@"; then
+    printf '%s' "$GPU_USAGE_OUT"
+    return 0
+  fi
+  return 1
+}
+
+gpu_job_start() {
+  tmp_gpu=$(mktemp 2>/dev/null || true)
+  if [[ -z $tmp_gpu ]]; then return 1; fi
+  (
+    trap - EXIT
+    gpu_name=$(lspci 2>/dev/null | awk -F': ' '/VGA|3D controller|Display/{print $2; exit}' || true)
+    gpu_name=$(gpu_short "$gpu_name")
+    gpu_use=$(gpu_usage "$gpu_name" || true)
+    printf '%s\n%s\n' "$gpu_name" "$gpu_use" > "$tmp_gpu"
+  ) & gpu_pid=$!
+  return 0
+}
+
+gpu_job_wait() {
+  if [[ -n $gpu_pid ]]; then
+    wait "$gpu_pid" 2>/dev/null || true
+    gpu_pid=''
+  fi
+  if [[ -n $tmp_gpu ]]; then
+    if [[ -s $tmp_gpu ]]; then
+      { read -r gpu || gpu=''; read -r gpu_pct || gpu_pct=''; } < "$tmp_gpu" || true
+    fi
+    rm -f -- "$tmp_gpu"
+    tmp_gpu=''
+  fi
+  return 0
+}
+
+collect_gpu_name() {
+  gpu=$(lspci 2>/dev/null | awk -F': ' '/VGA|3D controller|Display/{print $2; exit}' || true)
+  gpu=$(gpu_short "$gpu")
+  gpu_pct=$(gpu_usage "$gpu" || true)
+  return 0
+}
+
+start_gpu_poller() {
+  if [[ $gpu == *AMD* || $gpu == *Intel* ]]; then return 0; fi
+  command -v nvidia-smi >/dev/null 2>&1 || return 0
+  gpu_poll_file=$(mktemp 2>/dev/null || true)
+  if [[ -z $gpu_poll_file ]]; then return 0; fi
+  gpu_poll_new=$gpu_poll_file.new
+  (
+    trap - EXIT
+    set +e
+    while :; do
+      v=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ')
+      if [[ $v =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$v" > "$gpu_poll_new" && mv -f -- "$gpu_poll_new" "$gpu_poll_file"
+      fi
+      sleep 2
+    done
+  ) & gpu_poll_pid=$!
+  return 0
+}
+
+collect_gpu_usage() {
+  if [[ -n $gpu_poll_file ]]; then
+    if [[ -s $gpu_poll_file ]]; then
+      local v
+      v=$(<"$gpu_poll_file")
+      if [[ $v =~ ^[0-9]+$ ]]; then gpu_pct=$v; fi
+    fi
+  else
+    if gpu_usage_var "$gpu"; then
+      gpu_pct=$GPU_USAGE_OUT
+    else
+      gpu_pct=''
+    fi
+  fi
+  return 0
+}
+
+cpu_temp() {
+  local h name f t z
+  for h in /sys/class/hwmon/hwmon*; do
+    [[ -r $h/name ]] || continue
+    name=$(<"$h/name")
+    case $name in
+      k10temp|coretemp|zenpower|cpu_thermal|soc_thermal|acpitz) ;;
+      *) continue ;;
+    esac
+    for f in "$h"/temp*_input; do
+      [[ -r $f ]] || continue
+      t=$(<"$f")
+      [[ $t =~ ^[0-9]+$ ]] || continue
+      if (( t > 1000 )); then t=$(( t / 1000 )); fi
+      CPU_TEMP_OUT=$t
+      return 0
+    done
+  done
+  for z in /sys/class/thermal/thermal_zone*; do
+    [[ -r $z/temp && -r $z/type ]] || continue
+    case $(<"$z/type") in
+      *cpu*|*pkg*|*soc*|acpitz*|x86*) ;;
+      *) continue ;;
+    esac
+    t=$(<"$z/temp")
+    [[ $t =~ ^[0-9]+$ ]] || continue
+    if (( t > 1000 )); then t=$(( t / 1000 )); fi
+    CPU_TEMP_OUT=$t
+    return 0
+  done
+  for z in /sys/class/thermal/thermal_zone*; do
+    [[ -r $z/temp ]] || continue
+    t=$(<"$z/temp")
+    [[ $t =~ ^[0-9]+$ ]] || continue
+    if (( t > 1000 )); then t=$(( t / 1000 )); fi
+    CPU_TEMP_OUT=$t
+    return 0
+  done
+  CPU_TEMP_OUT=''
+  return 1
+}
+
+temp_limit() {
+  local f t best=0
+  for f in /sys/class/thermal/thermal_zone*/trip_point_*_temp; do
+    [[ -r $f ]] || continue
+    t=$(<"$f")
+    [[ $t =~ ^[0-9]+$ ]] || continue
+    if (( t > 1000 )); then t=$(( t / 1000 )); fi
+    if (( t > best && t <= 130 )); then
+      best=$t
+    fi
+  done
+  if (( best > 0 )); then
+    printf '%s' "$best"
+  else
+    printf '100'
+  fi
+}
+
+collect_static() {
+  kernel=$(uname -r 2>/dev/null || printf '%s' "$L_UNKNOWN")
+  shell_v="bash ${BASH_VERSION%%(*}"
+  cpu_model=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)
+  if [[ -z $cpu_model ]]; then cpu_model=$(uname -m 2>/dev/null || printf '%s' "$L_UNKNOWN"); fi
+  cpu_model=$(cpu_short "$cpu_model")
+  cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo '?')
+  cpu_mhz=''
+  if [[ -r /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq ]]; then
+    cpu_mhz=$(awk '{printf "%.1f", $1 / 1000000}' /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null || true)
+  fi
+  if [[ -z $cpu_mhz ]]; then
+    cpu_mhz=$(awk -F': ' '/cpu MHz/{v=$2+0; if(v>m)m=v} END{if(m)printf "%.1f", m/1000}' /proc/cpuinfo 2>/dev/null || true)
+  fi
+  t_limit=$(temp_limit)
+  lan=$(lan_info)
+  return 0
+}
+
+collect_uptime() {
+  read -r up _ < /proc/uptime || up=0
+  up=${up%.*}
+  d=$(( up / 86400 ))
+  h=$(( up % 86400 / 3600 ))
+  m=$(( up % 3600 / 60 ))
+  uptime_str=''
+  if (( d > 0 )); then uptime_str+="${d}d "; fi
+  if (( d > 0 || h > 0 )); then uptime_str+="${h}h "; fi
+  uptime_str+="${m}m"
+  return 0
+}
+
+collect_load() {
+  read -r l1 _ _ < /proc/loadavg || l1=0
+  if [[ ! $l1 =~ ^[0-9]+([.][0-9]+)?$ ]]; then l1=0; fi
+  load_pct=0
+  load_detail=$l1
+  if [[ $cores =~ ^[0-9]+$ ]] && (( cores > 0 )); then
+    local whole frac
+    if [[ $l1 == *.* ]]; then whole=${l1%%.*}; frac=${l1#*.}; else whole=$l1; frac=0; fi
+    load_pct=$(( (10#$whole * 100 + 10#$frac) / cores ))
+    load_detail="$l1/$cores"
+  fi
+  return 0
+}
+
+collect_mem() {
+  local key val _
+  mem_total_kb=0
+  mem_avail_kb=0
+  mem_free_kb=0
+  swap_total_kb=0
+  swap_free_kb=0
+  if [[ -r /proc/meminfo ]]; then
+    while read -r key val _; do
+      case $key in
+        MemTotal:) mem_total_kb=$val ;;
+        MemAvailable:) mem_avail_kb=$val ;;
+        MemFree:) mem_free_kb=$val ;;
+        SwapTotal:) swap_total_kb=$val ;;
+        SwapFree:) swap_free_kb=$val ;;
+      esac
+    done < /proc/meminfo
+  fi
+  if (( mem_avail_kb == 0 )); then mem_avail_kb=$mem_free_kb; fi
+  mem_total_b=$(( mem_total_kb * 1024 ))
+  mem_avail_b=$(( mem_avail_kb * 1024 ))
+  mem_used_b=$(( mem_total_b - mem_avail_b ))
+  mem_pct=0
+  if (( mem_total_b > 0 )); then mem_pct=$(( mem_used_b * 100 / mem_total_b )); fi
+  swap_total_b=$(( swap_total_kb * 1024 ))
+  swap_free_b=$(( swap_free_kb * 1024 ))
+  swap_used_b=$(( swap_total_b - swap_free_b ))
+  swap_pct=0
+  if (( swap_total_b > 0 )); then swap_pct=$(( swap_used_b * 100 / swap_total_b )); fi
+  return 0
+}
+
+collect_disk() {
+  local _src _size _used _avail _pcent _mp root_seen=0
+  disk_used=0
+  disk_size=0
+  disk_pct=0
+  disk_mp=/
+  home_sep=0
+  home_used=0
+  home_size=0
+  home_pct=0
+  while read -r _src _size _used _avail _pcent _mp; do
+    [[ $_size =~ ^[0-9]+$ ]] || continue
+    if (( ! root_seen )); then
+      disk_size=$_size
+      disk_used=$_used
+      disk_pct=${_pcent%\%}
+      disk_mp=$_mp
+      root_seen=1
+    elif [[ $_mp != "$disk_mp" ]]; then
+      home_size=$_size
+      home_used=$_used
+      home_pct=${_pcent%\%}
+      home_sep=1
+      break
+    fi
+  done < <(df -P -B1 -- / "$HOME" 2>/dev/null || true)
+  if [[ ! $disk_size =~ ^[0-9]+$ ]]; then disk_size=0; fi
+  if [[ ! $disk_used =~ ^[0-9]+$ ]]; then disk_used=0; fi
+  if [[ ! $disk_pct =~ ^[0-9]+$ ]]; then disk_pct=0; fi
+  if [[ -z $disk_mp ]]; then disk_mp=/; fi
+  disk_ok=0
+  if (( disk_size > 0 )); then disk_ok=1; fi
+  if [[ ! $home_size =~ ^[0-9]+$ ]]; then home_size=0; fi
+  if [[ ! $home_used =~ ^[0-9]+$ ]]; then home_used=0; fi
+  if [[ ! $home_pct =~ ^[0-9]+$ ]]; then home_pct=0; fi
+  return 0
+}
+
+collect_temp() {
+  cpu_temp || true
+  cpu_t=$CPU_TEMP_OUT
+  t_pct=0
+  if [[ $cpu_t =~ ^[0-9]+$ ]] && (( t_limit > 0 )); then
+    t_pct=$(( cpu_t * 100 / t_limit ))
+  fi
+  return 0
+}
+
+collect_battery() {
+  local b
+  bat_cap=''
+  bat_status=''
+  bat_limit=''
+  for b in /sys/class/power_supply/BAT*; do
+    [[ -e $b ]] || continue
+    if [[ -r $b/capacity ]]; then read -r bat_cap < "$b/capacity"; fi
+    if [[ -r $b/status ]]; then read -r bat_status < "$b/status"; fi
+    if [[ -r $b/charge_control_end_threshold ]]; then read -r bat_limit < "$b/charge_control_end_threshold"; fi
+    break
+  done
+  return 0
+}
+
+collect_dynamic_once() {
+  collect_uptime
+  collect_load
+  collect_mem
+  collect_disk
+  collect_temp
+  collect_battery
+  collect_cpu
+  return 0
+}
+
+collect_dynamic_tick() {
+  collect_uptime
+  collect_load
+  collect_mem
+  if (( ${1:-0} )); then collect_disk; fi
+  collect_gpu_usage
+  collect_temp
+  collect_battery
+  collect_cpu_tick
+  compute_details
+  return 0
+}
+
+compute_details() {
+  cpu_detail=''
+  if [[ -n $cpu_mhz ]]; then cpu_detail="@${cpu_mhz}GHz"; fi
+  gpu_detail=''
+  if [[ -z $gpu_pct ]]; then gpu_detail=$L_NA; fi
+  temp_detail=$L_NA
+  if [[ $cpu_t =~ ^[0-9]+$ ]]; then temp_detail="${cpu_t}/${t_limit}°C"; fi
+  human_var "$mem_used_b" HUMAN_A
+  human_var "$mem_total_b" HUMAN_B
+  ram_detail="$HUMAN_A/$HUMAN_B"
+  swap_detail=$L_NO_SWAP
+  if (( swap_total_b > 0 )); then
+    human_var "$swap_used_b" HUMAN_A
+    human_var "$swap_total_b" HUMAN_B
+    swap_detail="$HUMAN_A/$HUMAN_B"
+  fi
+  disk_detail=$L_NA
+  if (( disk_ok )); then
+    human_var "$disk_used" HUMAN_A
+    human_var "$disk_size" HUMAN_B
+    disk_detail="$HUMAN_A/$HUMAN_B"
+  fi
+  bat_detail=''
+  if [[ -n $bat_cap ]]; then
+    case $bat_status in
+      Full|'Not charging') bat_detail=$L_FULL ;;
+      Charging) bat_detail=$L_CHARGING ;;
+      Discharging) bat_detail=$L_DISCHARGING ;;
+      Unknown) bat_detail=$L_UNKNOWN ;;
+      *) bat_detail=$bat_status ;;
+    esac
+    if [[ -n $bat_limit ]]; then bat_detail+=" · ${bat_limit}%"; fi
+  fi
+  home_detail=''
+  if (( home_sep )); then
+    human_var "$home_used" HUMAN_A
+    human_var "$home_size" HUMAN_B
+    home_detail="$HUMAN_A/$HUMAN_B"
+  fi
+  return 0
+}
+
+GLYPH=(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
+
+trow_into() {
+  local label=$1 pct=$2 detail=${3:-} max=$(( cols - BAR_W - 19 )) margin=${4:-1} shown=$2 i filled label_str pct_str bar
+  if (( max < 1 )); then max=1; fi
+  if (( shown < 0 )); then shown=0; fi
+  if (( shown > 100 )); then shown=100; fi
+  if (( pct < 0 )); then pct=0; fi
+  if (( pct > 100 )); then pct=100; fi
+  fit_detail_var "$detail" "$max"
+  detail=$FIT_OUT
+  filled=$(( pct * BAR_W / 100 ))
+  bar=''
+  for (( i=0; i<BAR_W; i++ )); do
+    if (( i < filled )); then bar+='▰'; else bar+='▱'; fi
+  done
+  printf -v label_str '%-5s' "$label"
+  printf -v pct_str ' %s%3d%%%s' "$BLD$C_RED" "$shown" "$RST"
+  TROW_OUT=''
+  if (( margin )); then TROW_OUT='  '; fi
+  TROW_OUT+="$C_RED$label_str$RST $C_RED$bar$RST$pct_str"
+  if [[ -n $detail ]]; then TROW_OUT+="  $BLD$C_RED$detail$RST"; fi
+  TROW_OUT+=$'\n'
+  return 0
+}
+
+trow() {
+  trow_into "$@"
+  printf '%s' "$TROW_OUT"
+}
+
+trow2() {
+  local l1=$1 p1=$2 d1=${3:-} l2=$4 p2=$5 d2=${6:-} left right ll pad lmax rmax
+  lmax=$(( LEFT_W - BAR_W - 15 ))
+  rmax=$(( RIGHT_W - BAR_W - 15 ))
+  if (( lmax < 1 )); then lmax=1; fi
+  if (( rmax < 1 )); then rmax=1; fi
+  fit_detail_var "$d1" "$lmax"
+  d1=$FIT_OUT
+  fit_detail_var "$d2" "$rmax"
+  d2=$FIT_OUT
+  trow_into "$l1" "$p1" "$d1"
+  left=$TROW_OUT
+  ll=$(( 13 + BAR_W ))
+  if [[ -n $d1 ]]; then ll=$(( ll + 2 + ${#d1} )); fi
+  pad=$(( LEFT_W + GAP - ll ))
+  if (( pad < 2 )); then pad=2; fi
+  if [[ -z $l2 ]]; then
+    printf '%s' "$left"
+    return 0
+  fi
+  trow_into "$l2" "$p2" "$d2" 0
+  right=$TROW_OUT
+  left=${left%$'\n'}
+  right=${right%$'\n'}
+  printf '%s%*s%s\n' "$left" "$pad" '' "$right"
+}
+
+hist_str_into() {
+  local i idx out
+  printf -v out '  %s%-5s%s %s' "$C_RED" 'Hist' "$RST" "$C_RED"
+  for (( i=0; i<8; i++ )); do
+    idx=$(( hist[i] * 7 / 100 ))
+    if (( idx < 0 )); then idx=0; fi
+    if (( idx > 7 )); then idx=7; fi
+    out+="${GLYPH[idx]}"
+  done
+  HIST_OUT="$out$RST"
+  return 0
+}
+
+hist_str() {
+  hist_str_into
+  printf '%s\n' "$HIST_OUT"
+}
+
+draw_rule() {
+  local w=$1 i n seg
+  if (( anim )); then
+    for (( i=0; i<=10; i++ )); do
+      n=$(( w * i / 10 ))
+      printf '\r  %s' "$C_RED"
+      printf -v seg '%*s' "$n" ''
+      seg=${seg// /─}
+      printf '%s%s\033[K' "$seg" "$RST"
+      sleep "$anim_rule_delay"
+    done
+    printf '\n'
+  else
+    printf '  %s' "$C_RED"
+    printf -v seg '%*s' "$w" ''
+    seg=${seg// /─}
+    printf '%s%s\n' "$seg" "$RST"
+  fi
+}
+
+header_seg() {
+  local label=$1 width=$2 text left right fl fr
+  text=" ${label} "
+  left=$(( (width - ${#text}) / 2 ))
+  if (( left < 0 )); then left=0; fi
+  right=$(( width - ${#text} - left ))
+  if (( right < 0 )); then right=0; fi
+  printf '%s' "$C_RED"
+  printf -v fl '%*s' "$left" ''
+  fl=${fl// /─}
+  printf '%s' "$fl"
+  printf '%s%s%s%s' "$RST" "$BLD$C_RED" "$text" "$RST"
+  printf '%s' "$C_RED"
+  printf -v fr '%*s' "$right" ''
+  fr=${fr// /─}
+  printf '%s%s' "$fr" "$RST"
+}
+
+hdr2() {
+  printf '  '
+  header_seg "$1" $(( LEFT_W - 2 ))
+  printf '%*s' "$GAP" ''
+  header_seg "$2" "$RIGHT_W"
+  printf '\n'
+}
+
+hdr1() {
+  printf '  '
+  header_seg "$1" $(( cols - 4 ))
+  printf '\n'
+}
+
+sline2() {
+  local l1=$1 v1=$2 l2=$3 v2=$4 lw rw
+  lw=$(( LEFT_W - 10 ))
+  rw=$(( RIGHT_W - 8 ))
+  if (( lw < 1 )); then lw=1; fi
+  if (( rw < 1 )); then rw=1; fi
+  shorten_var "$v1" "$lw"
+  v1=$SHORT_OUT
+  if [[ -z $l2 ]]; then
+    printf '  %s%-7s%s %s%s%s\n' "$C_RED" "$l1" "$RST" "$BLD$C_RED" "$v1" "$RST"
+    return 0
+  fi
+  shorten_var "$v2" "$rw"
+  v2=$SHORT_OUT
+  printf '  %s%-7s%s %s%-*s%s   %s%-7s%s %s%s%s\n' \
+    "$C_RED" "$l1" "$RST" "$BLD$C_RED" "$lw" "$v1" "$RST" \
+    "$C_RED" "$l2" "$RST" "$BLD$C_RED" "$v2" "$RST"
+}
+
+sline1() {
+  local l=$1 v=$2 vw
+  vw=$(( cols - 12 ))
+  if (( vw < 1 )); then vw=1; fi
+  shorten_var "$v" "$vw"
+  v=$SHORT_OUT
+  printf '  %s%-7s%s %s%s%s\n' "$C_RED" "$l" "$RST" "$BLD$C_RED" "$v" "$RST"
+}
+
+render_metrics() {
+  local s=$1 left ll pad right
+  trow2 'CPU' $(( cpu_pct * s / 100 )) "$cpu_detail" 'RAM' $(( mem_pct * s / 100 )) "$ram_detail"
+  trow2 'Temp' $(( t_pct * s / 100 )) "$temp_detail" 'SWAP' $(( swap_pct * s / 100 )) "$swap_detail"
+  trow2 "$L_LOAD" $(( load_pct * s / 100 )) "$load_detail" "$L_DISK" $(( disk_pct * s / 100 )) "$disk_detail"
+  if [[ -n $bat_cap ]]; then
+    trow2 'GPU' $(( ${gpu_pct:-0} * s / 100 )) "$gpu_detail" 'Bat' $(( bat_cap * s / 100 )) "$bat_detail"
+  else
+    trow2 'GPU' $(( ${gpu_pct:-0} * s / 100 )) "$gpu_detail" '' 0 ''
+  fi
+  hist_str_into
+  left=$HIST_OUT
+  ll=16
+  if (( home_sep )); then
+    pad=$(( LEFT_W + GAP - ll ))
+    if (( pad < 2 )); then pad=2; fi
+    right=$(trow 'Home' $(( home_pct * s / 100 )) "$home_detail" 0)
+    printf '%s%*s%s\n' "$left" "$pad" '' "$right"
+  else
+    printf '%s\n' "$left"
+  fi
+}
+
+render_footer() {
+  local footer maxw
+  maxw=$(( cols - 2 ))
+  if (( maxw < 1 )); then maxw=1; fi
+  if (( paused )); then
+    footer="$L_PAUSED  "
+  else
+    footer=''
+  fi
+  footer+="q $L_FOOT_Q  p $L_FOOT_P  +/- ${interval_s}s  r $L_FOOT_R  h $L_FOOT_H"
+  if (( ${#footer} > maxw )); then
+    footer="q p +/- ${interval_s}s r h"
+    if (( paused )); then footer="$L_PAUSED  $footer"; fi
+  fi
+  if (( ${#footer} > maxw )); then
+    footer=${footer:0:maxw}
+  fi
+  printf '  %s%s%s\n' "$C_RED$BLD" "$footer" "$RST"
+}
+
+render_panel() {
+  local with_footer=${1:-0} compact=${2:-0} rule_w s
+  rule_w=$(( cols - 4 ))
+  if (( anim )); then hide_cursor; fi
+  if (( ! compact )); then printf '\n'; fi
+  draw_rule "$rule_w"
+  printf '\n'
+  if (( wide )); then
+    hdr2 "$L_SYSTEM" "$L_HARDWARE"
+    sline2 "$L_UPTIME" "$uptime_str" 'CPU' "$cpu_model"
+    sline2 'Shell' "$shell_v" 'GPU' "${gpu:-$L_NA}"
+    sline2 'Kernel' "$kernel" 'LAN' "$lan"
+    sline2 "$L_CORES" "$cores" "$L_PUBLIC" "$pub"
+    printf '\n'
+    hdr2 "$L_PERFORMANCE" "$L_MEMORY"
+    if (( anim )); then
+      render_metrics 0
+      for s in 16 33 50 66 83 100; do
+        printf '\033[5A'
+        render_metrics "$s"
+        sleep "$anim_bar_delay"
+      done
+    else
+      render_metrics 100
+    fi
+  else
+    hdr1 "$L_SYSTEM"
+    sline1 "$L_UPTIME" "$uptime_str"
+    sline1 'Shell' "$shell_v"
+    sline1 'Kernel' "$kernel"
+    sline1 "$L_CORES" "$cores"
+    sline1 'CPU' "$cpu_model"
+    sline1 'GPU' "${gpu:-$L_NA}"
+    sline1 'LAN' "$lan"
+    sline1 "$L_PUBLIC" "$pub"
+    printf '\n'
+    hdr1 "$L_PERFORMANCE"
+    trow 'CPU' "$cpu_pct" "$cpu_detail"
+    trow 'Temp' "$t_pct" "$temp_detail"
+    trow "$L_LOAD" "$load_pct" "$load_detail"
+    trow 'GPU' "${gpu_pct:-0}" "$gpu_detail"
+    trow 'RAM' "$mem_pct" "$ram_detail"
+    trow 'SWAP' "$swap_pct" "$swap_detail"
+    trow "$L_DISK" "$disk_pct" "$disk_detail"
+    if (( home_sep )); then
+      trow 'Home' "$home_pct" "$home_detail"
+    fi
+    if [[ -n $bat_cap ]]; then
+      trow 'Bat' "$bat_cap" "$bat_detail"
+    fi
+    hist_str
+  fi
+  if (( with_footer )); then render_footer; fi
+  return 0
+}
+
+render_monitor_frame() {
+  local frame frame_lines nl pad spaces
+  frame=$(render_panel "$show_footer" 1)
+  if [[ -n $frame ]]; then
+    nl=${frame//$'\n'/}
+    frame_lines=$(( ${#frame} - ${#nl} + 1 ))
+  else
+    frame_lines=0
+  fi
+  if (( frame_lines > term_lines )) && (( show_footer )); then
+    frame=$(render_panel 0 1)
+    if [[ -n $frame ]]; then
+      nl=${frame//$'\n'/}
+      frame_lines=$(( ${#frame} - ${#nl} + 1 ))
+    else
+      frame_lines=0
+    fi
+  fi
+  if (( term_cols < 40 || term_lines < frame_lines )); then
+    printf '\033[H\033[2J  %s\n' "$L_SMALL"
+    return 0
+  fi
+  if (( term_cols > cols )); then
+    pad=$(( (term_cols - cols) / 2 ))
+    if (( pad > 0 )); then
+      printf -v spaces '%*s' "$pad" ''
+      frame="$spaces${frame//$'\n'/$'\n'$spaces}"
+    fi
+  fi
+  printf '\033[H\033[2J%s' "$frame"
+  return 0
+}
+
+run_once() {
+  update_size
+  if ! gpu_job_start; then collect_gpu_name; fi
+  start_ip_fetch
+  collect_static
+  collect_dynamic_once
+  gpu_job_wait
+  finish_ip_fetch
+  compute_details
+  render_panel 0 0
+  show_cursor
+  return 0
+}
+
+run_monitor() {
+  if (( ! is_tty )) || [[ ! -t 0 ]] || [[ ${TERM:-} == dumb ]]; then
+    printf 'kurenai: %s\n' "$(t monitor_tty)" >&2
+    exit 2
+  fi
+  anim=0
+  monitor_enter
+  update_size
+  collect_static
+  if ! gpu_job_start; then
+    collect_gpu_name
+  else
+    gpu_job_wait
+  fi
+  start_gpu_poller
+  init_ip_monitor
+  collect_dynamic_once
+  cpu_snapshot
+  compute_details
+  tick=0
+  frames=1
+  render_monitor_frame
+  if (( max_frames > 0 && frames >= max_frames )); then
+    monitor_leave
+    return 0
+  fi
+  while :; do
+    key=''
+    rc=0
+    IFS= read -rsn1 -t "$wait_s" key || rc=$?
+    if (( rc > 128 )); then
+      :
+    elif (( rc != 0 )); then
+      break
+    fi
+    case $key in
+      q|Q) break ;;
+      p|P)
+        if (( paused )); then
+          paused=0
+          cpu_snapshot
+        else
+          paused=1
+        fi ;;
+      +|=)
+        interval_ms=$(( interval_ms + 250 ))
+        if (( interval_ms > 10000 )); then interval_ms=10000; fi
+        update_wait ;;
+      -|_)
+        interval_ms=$(( interval_ms - 250 ))
+        if (( interval_ms < 250 )); then interval_ms=250; fi
+        update_wait ;;
+      r|R)
+        if (( ip_pending )); then poll_ip_fetch; fi
+        if (( ! ip_pending )); then start_ip_fetch 1; fi
+        collect_static ;;
+      h|H)
+        if (( show_footer )); then show_footer=0; else show_footer=1; fi ;;
+    esac
+    if (( resized )); then
+      resized=0
+      update_size
+    fi
+    if (( ! paused )); then
+      tick=$(( tick + 1 ))
+      with_disk=0
+      if (( tick % 5 == 0 )); then with_disk=1; fi
+      collect_dynamic_tick "$with_disk"
+      poll_ip_fetch
+    fi
+    render_monitor_frame
+    frames=$(( frames + 1 ))
+    if (( max_frames > 0 && frames >= max_frames )); then break; fi
+  done
+  monitor_leave
+  return 0
+}
+
+if (( monitor )); then
+  run_monitor
+else
+  run_once
+fi
