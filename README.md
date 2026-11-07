@@ -82,24 +82,11 @@ Hay dos formas de usarlo:
 
 ## Vista rápida
 
-```text
-  ────────────────────────────────────────────────────────────────────────────
+<p align="center">
+  <img src="assets/preview.png" alt="kurenai en una terminal de 80 columnas" width="100%">
+</p>
 
-  ─────────── SISTEMA ────────────   ─────────────── HARDWARE ────────────────
-  Activo  3d 4h 12m                  CPU     AMD Ryzen 7 5800X
-  Shell   bash 5.2.21                GPU     AMD Radeon RX 6700 XT
-  Kernel  6.8.0-generic              LAN     enp5s0 192.0.2.42
-  Núcleos 16                         Pública 198.51.100.42
-
-  ───────── RENDIMIENTO ──────────   ──────────────── MEMORIA ────────────────
-  CPU   ▰▰▰▰▰▰▱▱▱▱  38%  @4.7GHz     RAM   ▰▰▰▰▰▰▰▱▱▱  52%  16.7G/32.0G
-  Temp  ▰▰▰▰▰▱▱▱▱▱  61%  57/94°C     SWAP  ▰▱▱▱▱▱▱▱▱▱  12%  1.0G/8.0G
-  Carga ▰▰▱▱▱▱▱▱▱▱  21%  3.40/16     Disco ▰▰▰▱▱▱▱▱▱▱  31%  96G/310G
-  GPU   ▰▰▰▱▱▱▱▱▱▱  27%              Bat   ▰▰▰▰▰▰▰▰▰▱  94%  descarga
-  Hist  ▃▅▄▆▇▅▄▃
-```
-
-> Las IPs de los ejemplos son ficticias y no corresponden a ninguna red real.
+> Captura del panel de una sola vez a 80 columnas.
 
 ## Requisitos
 
@@ -230,6 +217,12 @@ kurenai -m -n          # oculta la IP pública
 
 El modo monitor entra en la pantalla alternativa, oculta el cursor y redibuja el panel cada segundo. Mantiene la misma estética: rojo neón, barras `▰/▱`, reglas `─` y dos columnas.
 
+<p align="center">
+  <img src="assets/monitor.gif" alt="kurenai -m actualizando el panel en vivo" width="100%">
+</p>
+
+> GIF a 0.5 s para que se aprecie el refresco; el intervalo por defecto es 1 s.
+
 | Tecla | Acción |
 | --- | --- |
 | `q` | Salir y restaurar la terminal. |
@@ -348,6 +341,8 @@ Se detecta `LC_ALL`, `LC_MESSAGES`, `LANGUAGE` o `LANG`. `-l es|en` lo fuerza y 
 | `Makefile` | `make test`, `make lint`, `make check`. |
 | `.github/workflows/ci.yml` | Lint y tests en CI. |
 | `assets/banner-kurenai.svg` | Banner del README. |
+| `assets/preview.png` | Captura del panel. |
+| `assets/monitor.gif` | Demo del modo monitor. |
 
 ## Rendimiento
 
